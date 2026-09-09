@@ -40,6 +40,7 @@ from v2.strategies.young_surge_continuation import YoungSurgeContinuation
 from v2.strategies.exhaustion_mean_reversion import ExhaustionMeanReversion
 from v2.strategies.mirage_liquidity_sweep import MirageLiquiditySweepCartridge
 from v2.coexistence import CoexistenceGatekeeper, MAGIC_V2
+from core.expectancy_tracker import QuantExpectancyTracker
 
 logger = logging.getLogger("SajimV2DualBot")
 
@@ -63,9 +64,9 @@ class SajimV2DualBot:
     def __init__(
         self,
         gatekeeper: Optional[CoexistenceGatekeeper] = None,
-        base_risk_fraction: float = 0.012,       # 1.2% base risk per trade
-        max_risk_fraction: float = 0.018,        # 1.8% hard cap on win streaks
-        streak_expansion_rate: float = 0.10,     # +10% lot expansion per win
+        base_risk_fraction: float = 0.25,        # 25% base risk per trade (Extreme Velocity Mode)
+        max_risk_fraction: float = 0.40,         # 40% hard cap on win streaks
+        streak_expansion_rate: float = 1.00,     # +100% (Double) lot expansion per win
         dry_run: bool = False,
     ):
         self.terminal_path = r"C:\Program Files\MetaTrader 5\terminal64.exe"
@@ -97,6 +98,7 @@ class SajimV2DualBot:
         self.processed_deal_tickets: Set[int] = set()
         self.trailing_ratchet_state: Dict[int, str] = {}  # ticket -> stage ('STAGE_1_BE', 'STAGE_2_LOCK')
         self.symbol_cooldowns: Dict[str, datetime] = {}
+        self.ev_trades_processed = 0  # Counter to trigger EV reports
 
     def register_cartridge(self, cartridge: BaseStrategyCartridge) -> None:
         """Plugs in a new strategy cartridge dynamically."""
@@ -184,6 +186,15 @@ class SajimV2DualBot:
                     self.consecutive_wins = 0
                     self.symbol_cooldowns[d.symbol] = datetime.now() + timedelta(minutes=30)
                     logger.info(f"[⚠️ V2 LOSS] Deal #{d.ticket} {d.symbol} closed with -${abs(d.profit):.2f}. Cooldown applied (30m).")
+                
+                # Update EV Tracker every 5 closed trades
+                if abs(d.profit) > 0.10:
+                    self.ev_trades_processed += 1
+                    if self.ev_trades_processed % 5 == 0:
+                        tracker = QuantExpectancyTracker()
+                        stats = tracker.calculate_current_edge()
+                        if "error" not in stats:
+                            self.bus.broadcast_expectancy_report(stats)
 
     def manage_open_positions(self) -> None:
         """
@@ -267,6 +278,7 @@ class SajimV2DualBot:
             )
             return True
 
+        cmt_text = "Scalping_Opp" if sig.timeframe == "M1" else f"Sajim_V2_{sig.strategy_name[:10]}"
         for filling in (mt5.ORDER_FILLING_IOC, mt5.ORDER_FILLING_FOK, mt5.ORDER_FILLING_RETURN):
             order_req = {
                 "action": mt5.TRADE_ACTION_DEAL,
@@ -278,7 +290,7 @@ class SajimV2DualBot:
                 "tp": float(sig.take_profit),
                 "deviation": 20,
                 "magic": MAGIC_V2,
-                "comment": f"Sajim_V2_{sig.strategy_name[:10]}",
+                "comment": cmt_text,
                 "type_time": mt5.ORDER_TIME_GTC,
                 "type_filling": filling,
             }
@@ -300,6 +312,7 @@ class SajimV2DualBot:
                         tp=sig.take_profit,
                         strategy_name=sig.strategy_name,
                         maturity_info=sig.metadata,
+                        timeframe=sig.timeframe,
                     )
                 except Exception as b_err:
                     logger.warning(f"Failed to broadcast V2 trade execution: {b_err}")
@@ -318,7 +331,7 @@ class SajimV2DualBot:
 
     def scan_and_evaluate(self) -> None:
         """Scans all registered symbols and timeframes against each strategy cartridge."""
-        timeframes = ["M5", "M15", "H1"]
+        timeframes = ["M1", "M5", "M15", "H1"]
         for sym in self.universe:
             # Check symbol cooldown
             now = datetime.now()
@@ -401,6 +414,7 @@ class SajimV2DualBot:
                                 phase=mat.get("phase", "UNKNOWN"),
                                 hma_val=mat.get("hma_val", signal.entry_price),
                                 reason=signal.reason,
+                                metadata=mat,
                             )
                         except Exception as b_err:
                             logger.debug(f"V2 broadcast error: {b_err}")

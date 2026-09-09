@@ -217,7 +217,13 @@ class BeepBroadcastBus:
         phase: str,
         hma_val: float,
         reason: str = "",
+        metadata: Optional[Dict[str, Any]] = None,
     ):
+        mat = metadata or {}
+        action_emoji = "🟢 BUY" if action == "BUY" else "🔴 SELL"
+        phase_emoji = "🌱" if "EARLY" in phase.upper() else ("🔥" if "LATE" in phase.upper() else "⚖️")
+        scalp_tag = "⚡ <b>[SCALPING OPPORTUNITY]</b> ⚡\n" if timeframe == "M1" else ""
+        
         if strategy_name == "MirageLiquiditySweep":
             score = mat.get("score", 0.0)
             swept_lvl = mat.get("swept_level", 0.0)
@@ -228,7 +234,7 @@ class BeepBroadcastBus:
             eq_tag = " [EQH/EQL Magnet]" if is_eq else ""
             card = (
                 f"💧 <b>[SAJIM V2] MIRAGE LIQUIDITY SWEEP: {symbol} ({timeframe})</b>\n"
-                f"━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"{scalp_tag}━━━━━━━━━━━━━━━━━━━━━━\n"
                 f"🎯 <b>Engine:</b> Mirage Liquidity Sweep Pro v1.3.1 (SMC)\n"
                 f"⚡ <b>Sweep Quality Score:</b> <b>{score:.1f} / 100</b>\n"
                 f"🧭 <b>Action:</b> <b>{action_emoji}</b> @ <code>{entry}</code>\n"
@@ -246,7 +252,7 @@ class BeepBroadcastBus:
         else:
             card = (
                 f"📊 <b>[SAJIM V2] TREND DURATION SIGNAL: {symbol} ({timeframe})</b>\n"
-                f"━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"{scalp_tag}━━━━━━━━━━━━━━━━━━━━━━\n"
                 f"🎯 <b>Engine:</b> Trend Duration Forecast (HMA-50)\n"
                 f"⚡ <b>Strategy:</b> {strategy_name}\n"
                 f"🧭 <b>Action:</b> <b>{action_emoji}</b> @ <code>{entry}</code>\n"
@@ -300,12 +306,15 @@ class BeepBroadcastBus:
         tp: float,
         strategy_name: str,
         maturity_info: Optional[Dict[str, Any]] = None,
+        timeframe: str = "",
     ):
         mat = maturity_info or {}
         trend_count = mat.get("trend_count", 0)
         prob_len = mat.get("probable_length", 20.0)
         phase = mat.get("phase", "UNKNOWN")
         mat_pct = int(mat.get("maturity_ratio", 0.0) * 100)
+
+        scalp_tag = "⚡ <b>[SCALPING OPPORTUNITY]</b> ⚡\n" if timeframe == "M1" else ""
 
         if strategy_name == "MirageLiquiditySweep":
             score = mat.get("score", 0.0)
@@ -314,7 +323,7 @@ class BeepBroadcastBus:
             choch_str = "CHoCH Confirmed" if is_choch else "Raw Sweep"
             card = (
                 f"🚀 <b>[SAJIM V2 LIVE EXECUTION] #{ticket} {symbol}</b>\n"
-                f"━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"{scalp_tag}━━━━━━━━━━━━━━━━━━━━━━\n"
                 f"🎯 <b>Engine:</b> Mirage Liquidity Sweep Pro v1.3.1 (Magic 888222)\n"
                 f"⚡ <b>Execution Mode:</b> {choch_str} (Score: {score:.1f}/100)\n"
                 f"🧭 <b>Direction:</b> <b>{action}</b> {lot} Lots @ <code>{entry}</code>\n"
@@ -328,7 +337,7 @@ class BeepBroadcastBus:
         else:
             card = (
                 f"🚀 <b>[SAJIM V2 LIVE EXECUTION] #{ticket} {symbol}</b>\n"
-                f"━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"{scalp_tag}━━━━━━━━━━━━━━━━━━━━━━\n"
                 f"🎯 <b>Engine:</b> Sajim V2 Trend Duration Maturity (Magic 888222)\n"
                 f"⚡ <b>Strategy Cartridge:</b> {strategy_name}\n"
                 f"🧭 <b>Direction:</b> <b>{action}</b> {lot} Lots @ <code>{entry}</code>\n"
@@ -646,6 +655,36 @@ class BeepBroadcastBus:
         }
         self._save_event(event)
         logger.info(f"[📢 BROADCAST] Deal result published for #{deal_ticket} ({symbol} {result} {profit:+.2f})")
+        return event
+
+    # =========================================================================
+    # EVENT 5: V2 QUANT EXPECTANCY REPORT
+    # =========================================================================
+    def broadcast_expectancy_report(self, stats: Dict[str, Any]):
+        if "error" in stats:
+            return None
+        
+        card = (
+            f"📊 <b>[SAJIM QUANT EDGE] V2 Performance Matrix</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"🎯 <b>Total Scored Trades:</b> {stats['total_trades']}\n"
+            f"✅ <b>Hits (Wins):</b> {stats['hits']} ({stats['win_rate']:.1f}%)\n"
+            f"❌ <b>Misses (Losses):</b> {stats['misses']}\n"
+            f"💰 <b>Average Output (Win):</b> <code>+${stats['avg_win']:.2f}</code>\n"
+            f"🛡️ <b>Average Risk (Loss):</b> <code>-${stats['avg_loss']:.2f}</code>\n"
+            f"📈 <b>Net Expectancy (EV):</b> <b>${stats['net_ev']:+.2f} USD</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"Status: {stats['status']}"
+        )
+        
+        event = {
+            "id": f"EV_{int(datetime.now().timestamp())}",
+            "type": "EXPECTANCY_REPORT",
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "broadcast_text": card,
+        }
+        self._save_event(event)
+        logger.info(f"[📊 BROADCAST] EV Report published: EV = ${stats['net_ev']:+.2f}")
         return event
 
     def get_pending_broadcasts(self, limit: int = 50) -> List[Dict[str, Any]]:
