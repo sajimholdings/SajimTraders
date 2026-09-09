@@ -1,0 +1,20 @@
+{
+  "symbol": "XAUUSD_M5_REAL_MT5",
+  "style": "REAL_MT5_CENT_FLIP",
+  "initial_balance": 4.0,
+  "final_balance": 4.13,
+  "net_profit_usd": 0.13,
+  "roi_pct": 3.23,
+  "total_trades": 114,
+  "winning_trades": 35,
+  "losing_trades": 79,
+  "win_rate_pct": 30.7,
+  "profit_factor": 0.77,
+  "max_drawdown_pct": 24.2,
+  "max_drawdown_usd": 1.17,
+  "initial_balance_cents": 400.0,
+  "final_balance_cents": 412.92,
+  "net_profit_cents": 12.92,
+  "catches_per_day": 19.8,
+  "avg_trade_duration_mins": 19.3
+}

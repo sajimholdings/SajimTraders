@@ -1,0 +1,94 @@
+{
+  "audit_date": "2026-09-09",
+  "audit_version": "1.0-EMPIRICAL-MT5",
+  "lead_architect": "Jimmy Mathu",
+  "description": "Empirical Edge Whitelist and Blacklist filter generated from 204-front MT5 quantitative backtest for Sajim V1.",
+  "approved_edges": {
+    "AUDJPY.c": ["M5", "H4"],
+    "CADJPY.c": ["M5", "H1"],
+    "CHFJPY.c": ["M5"],
+    "EURJPY.c": ["M5"],
+    "EURUSD.c": ["M30"],
+    "GBPJPY.c": ["M5", "M30", "H1"],
+    "NZDJPY.c": ["M30", "H1"],
+    "NZDUSD.c": ["H4"],
+    "USDCAD.c": ["M15", "M30", "H4"],
+    "USDJPY.c": ["M5", "M15"],
+    "XAGUSD.c": ["H4"],
+    "XAUGBP.c": ["M1", "H4"],
+    "XAUJPY.c": ["M1", "M30", "H4"],
+    "XAUUSD.c": ["M30", "H4"],
+    "XPDUSD.c": ["M30"],
+    "AUDJPY": ["M5", "H4"],
+    "CADJPY": ["M5", "H1"],
+    "CHFJPY": ["M5"],
+    "EURJPY": ["M5"],
+    "EURUSD": ["M30"],
+    "GBPJPY": ["M5", "M30", "H1"],
+    "NZDJPY": ["M30", "H1"],
+    "NZDUSD": ["H4"],
+    "USDCAD": ["M15", "M30", "H4"],
+    "USDJPY": ["M5", "M15"],
+    "XAGUSD": ["H4"],
+    "XAUGBP": ["M1", "H4"],
+    "XAUJPY": ["M1", "M30", "H4"],
+    "XAUUSD": ["M30", "H4"],
+    "XPDUSD": ["M30"]
+  },
+  "top_institutional_edges": [
+    {
+      "symbol": "USDCAD.c",
+      "timeframe": "M15",
+      "profit_factor": 1.99,
+      "win_rate_pct": 53.5,
+      "expectancy_r": 0.372
+    },
+    {
+      "symbol": "EURJPY.c",
+      "timeframe": "M5",
+      "profit_factor": 1.87,
+      "win_rate_pct": 56.2,
+      "expectancy_r": 0.334
+    },
+    {
+      "symbol": "NZDJPY.c",
+      "timeframe": "H1",
+      "profit_factor": 1.84,
+      "win_rate_pct": 54.9,
+      "expectancy_r": 0.284
+    },
+    {
+      "symbol": "CADJPY.c",
+      "timeframe": "M5",
+      "profit_factor": 1.70,
+      "win_rate_pct": 52.2,
+      "expectancy_r": 0.268
+    },
+    {
+      "symbol": "GBPJPY.c",
+      "timeframe": "H1",
+      "profit_factor": 1.61,
+      "win_rate_pct": 63.2,
+      "expectancy_r": 0.200
+    },
+    {
+      "symbol": "XAUUSD.c",
+      "timeframe": "H4",
+      "profit_factor": 1.55,
+      "win_rate_pct": 51.4,
+      "expectancy_r": 0.240
+    }
+  ],
+  "toxic_bleeders_summary": {
+    "total_bleeders_count": 157,
+    "worst_assets": [
+      "EURNZD.c (PF: 0.31)",
+      "XPTUSD.c (PF: 0.33)",
+      "EURCHF.c (PF: 0.34)",
+      "USDCHF.c (PF: 0.34)",
+      "AUDUSD.c on M1 (PF: 0.35)",
+      "GBPUSD.c on M1/M5 (PF: 0.41 - 0.63)"
+    ],
+    "universal_rule": "Reject all M1 timeframe setups and reject any asset where spread > 12% of ATR."
+  }
+}

@@ -1,0 +1,83 @@
+{
+  "timestamp": "2026-09-09 08:54:14",
+  "status": "COMPLETED",
+  "progress_fronts": "204/204",
+  "progress_pct": 100.0,
+  "elapsed_seconds": 162.1,
+  "current_eval": "XPTUSD.c (H4)",
+  "total_completed_fronts": 204,
+  "top_edge_pairs": [
+    {
+      "symbol": "USDCAD.c",
+      "tf": "M15",
+      "pf": 1.99,
+      "wr": 53.5,
+      "expectancy": 0.372
+    },
+    {
+      "symbol": "EURJPY.c",
+      "tf": "M5",
+      "pf": 1.87,
+      "wr": 56.2,
+      "expectancy": 0.334
+    },
+    {
+      "symbol": "NZDJPY.c",
+      "tf": "H1",
+      "pf": 1.84,
+      "wr": 54.9,
+      "expectancy": 0.284
+    },
+    {
+      "symbol": "CADJPY.c",
+      "tf": "M5",
+      "pf": 1.7,
+      "wr": 52.2,
+      "expectancy": 0.268
+    },
+    {
+      "symbol": "GBPJPY.c",
+      "tf": "H1",
+      "pf": 1.61,
+      "wr": 63.2,
+      "expectancy": 0.2
+    }
+  ],
+  "worst_bleeders": [
+    {
+      "symbol": "XPTUSD.c",
+      "tf": "M5",
+      "pf": 0.81,
+      "wr": 44.3,
+      "expectancy": -0.094
+    },
+    {
+      "symbol": "XPTUSD.c",
+      "tf": "M15",
+      "pf": 0.76,
+      "wr": 43.1,
+      "expectancy": -0.132
+    },
+    {
+      "symbol": "XPTUSD.c",
+      "tf": "M30",
+      "pf": 0.6,
+      "wr": 32.9,
+      "expectancy": -0.258
+    },
+    {
+      "symbol": "XPTUSD.c",
+      "tf": "H1",
+      "pf": 0.33,
+      "wr": 31.6,
+      "expectancy": -0.415
+    },
+    {
+      "symbol": "XPTUSD.c",
+      "tf": "H4",
+      "pf": 0.84,
+      "wr": 38.1,
+      "expectancy": -0.094
+    }
+  ]
+}

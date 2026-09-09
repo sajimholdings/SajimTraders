@@ -1,0 +1,25 @@
+{
+  "account": 1200438589,
+  "starting_equity_usc": 400.0,
+  "ending_equity_usc": 11.21,
+  "net_profit_usc": -388.79,
+  "net_roi_pct": -97.2,
+  "total_trades": 560,
+  "wins": 29,
+  "losses": 414,
+  "win_rate_pct": 5.18,
+  "profit_factor": 0.09,
+  "max_drawdown_pct": 97.5,
+  "layer_breakdown": {
+    "RARE": {
+      "trades": 294,
+      "win_rate": 1.7,
+      "net_pnl": -223.37
+    },
+    "CERTIFIED": {
+      "trades": 266,
+      "win_rate": 9.0,
+      "net_pnl": -205.08
+    }
+  }
+}

@@ -1,0 +1,267 @@
+<USER_REQUEST>
+//@version=6
+// ══════════════════════════════════════════════════════════
+// MIRAGE LIQUIDITY SWEEP PRO [WillyAlgoTrader]
+// ══════════════════════════════════════════════════════════
+// Author:  Willy | WillyAlgoTrader
+// Version: 1.3.1
+
+indicator(
+     title            = "Mirage Liquidity Sweep Pro [WillyAlgoTrader]",
+     shorttitle       = "Mirage LSP",
+     overlay          = true,
+     max_lines_count  = 500,
+     max_labels_count = 500,
+     max_boxes_count  = 500,
+     max_bars_back    = 5000)
+
+// ══════════════════════════════════════════════════════════
+// 1. CONSTANTS
+// ══════════════════════════════════════════════════════════
+GRP_MAIN    = "⚙️ Main Settings"
+GRP_CONFIRM = "🧩 Confirmation"
+GRP_FILTER  = "🔍 Filters"
+GRP_RISK    = "🛡️ Risk Management"
+GRP_LIQ     = "💧 Liquidity"
+GRP_VISUAL  = "🎨 Visual"
+GRP_DASH    = "📊 Dashboard"
+GRP_ALERT   = "🔔 Alerts"
+GRP_COLORS  = "🎨 Colors"
+
+INDICATOR_VERSION = "v1.3.1"
+MAX_STORED        = 25    // bounded swing memory
+MAX_SIG_LABELS    = 50    // bounded score labels
+LINE_FORWARD_BARS = 20
+LINE_UPDATE_BARS  = 5
+LABEL_OFFSET_BARS = 1
+BE_DIM_TRANSP     = 70
+FORM_LEN          = 10    // recent-form strip length
+MAX_EQ_MARKS      = 16    // bounded EQH/EQL drawings
+
+// ══════════════════════════════════════════════════════════
+// 2. INPUTS
+// ══════════════════════════════════════════════════════════
+
+// ── Main ────────────────────────────────────────────────────
+swingLenInput     = input.int(21, "Swing Length", minval = 3, maxval = 100, group = GRP_MAIN,
+     tooltip = "Pivot lookback for major swings to sweep.\n• Higher = bigger/cleaner liquidity pools\n• Lower = more frequent, smaller sweeps\n• Recommended: 10-25")
+lookbackBarsInput = input.int(80, "Max Sweep Distance (bars)", minval = 5, maxval = 500, group = GRP_MAIN,
+     tooltip = "A swing can only be swept within this many bars of forming.")
+minScoreInput     = input.int(50, "Min Sweep Score", minval = 0, maxval = 100, group = GRP_MAIN,
+     tooltip = "Minimum 0-100 quality score for a sweep to qualify.\n• Higher = fewer, stronger sweeps\n• ~45-60 balanced, 65+ strict")
+
+// ── Confirmation ────────────────────────────────────────────
+requireConfirmInput = input.bool(true, "Require CHoCH Confirmation", group = GRP_CONFIRM,
+     tooltip = "OFF: signal fires on the sweep bar (responsive).\nON: sweep becomes a setup; signal fires only after price breaks recent market structure (CHoCH).")
+minorLenInput       = input.int(8, "Structure Pivot Length", minval = 2, maxval = 30, group = GRP_CONFIRM,
+     tooltip = "Pivot length for the minor structure used to confirm CHoCH after a sweep.")
+confirmWindowInput  = input.int(13, "Confirmation Window (bars)", minval = 1, maxval = 100, group = GRP_CONFIRM,
+     tooltip = "Max bars to wait for a CHoCH after a sweep before the setup expires.")
+
+// ── Filters ─────────────────────────────────────────────────
+useVolumeInput  = input.bool(true, "Use Volume Filter", group = GRP_FILTER,
+     tooltip = "Reward sweeps on above-average volume. Auto-bypassed on volume-less feeds.")
+volLenInput     = input.int(21, "Volume MA Length", minval = 2, maxval = 200, group = GRP_FILTER,
+     tooltip = "Length of the volume moving average baseline.")
+volMultInput    = input.float(1.5, "Volume Spike (×MA)", minval = 1.1, maxval = 5.0, step = 0.1, group = GRP_FILTER,
+     tooltip = "Volume multiple of its MA that counts as a full-strength spike.")
+useHtfInput     = input.bool(true, "Use HTF Bias (score)", group = GRP_FILTER,
+     tooltip = "Reward sweeps aligned with the higher-timeframe EMA trend (soft, +10% of score).")
+htfTfInput      = input.timeframe("240", "HTF Timeframe", group = GRP_FILTER,
+     tooltip = "Higher timeframe for trend bias. Empty = current TF.")
+htfEmaLenInput  = input.int(50, "HTF EMA Length", minval = 5, maxval = 400, group = GRP_FILTER,
+     tooltip = "EMA length on the HTF (close above = bullish bias).")
+
+// ── Risk Management ─────────────────────────────────────────
+riskPresetInput = input.string("Balanced", "Risk Preset",
+     options = ["Conservative", "Balanced", "Aggressive", "Scalping", "Custom"], group = GRP_RISK,
+     tooltip = "Quick presets (SL buffer ×ATR beyond wick / TP1 / TP2 / TP3 in R):\n• Conservative: 0.5 / 1R / 2R / 4R\n• Balanced: 0.25 / 1R / 2R / 3R\n• Aggressive: 0.15 / 1.5R / 2.5R / 4R\n• Scalping: 0.1 / 0.8R / 1.5R / 2R\n• Custom: manual inputs below")
+atrLenRiskInput = input.int(14, "ATR Length", minval = 5, maxval = 50, group = GRP_RISK,
+     tooltip = "ATR period for the stop buffer and minimum-distance guard.")
+slBufferInput   = input.float(0.25, "SL Buffer ×ATR (Custom)", minval = 0.0, maxval = 3.0, step = 0.05, group = GRP_RISK,
+     tooltip = "Extra room beyond the sweep wick for the stop. Used when preset = Custom.")
+tp1MultInput    = input.float(1.0, "TP1 ×Risk (Custom)", minval = 0.5, maxval = 5.0,  step = 0.1, group = GRP_RISK,
+     tooltip = "TP1 as multiple of risk. 1.0 = 1:1 R:R.")
+tp2MultInput    = input.float(2.0, "TP2 ×Risk (Custom)", minval = 1.0, maxval = 10.0, step = 0.1, group = GRP_RISK)
+tp3MultInput    = input.float(3.0, "TP3 ×Risk (Custom)", minval = 1.5, maxval = 15.0, step = 0.1, group = GRP_RISK)
+
+useBreakEvenInput = input.bool(true, "Break-Even After TP1", group = GRP_RISK,
+     tooltip = "When TP1 is touched, move SL to entry. From the next bar, a wick to entry closes at break-even. (TP1 still counts as a WIN.)")
+
+showSlTpInput        = input.bool(true, "Show SL/TP Lines",  group = GRP_RISK)
+showSlTpLabelsInput  = input.bool(true, "Show SL/TP Labels", group = GRP_RISK)
+showPctOnLabelsInput = input.bool(true, "Show % Distance on Labels", group = GRP_RISK,
+     tooltip = "Append % distance from entry to SL/TP labels, e.g. 'SL 1.2300 (-0.36%)'.")
+entryLineStyleInput  = input.string("Dotted", "Entry Line Style", options = ["Solid", "Dashed", "Dotted"], group = GRP_RISK,
+     tooltip = "Entry is a reference, not an action level — keep it subtle.")
+slLineStyleInput     = input.string("Solid", "SL Line Style", options = ["Solid", "Dashed", "Dotted"], group = GRP_RISK)
+tpLineStyleInput     = input.string("Dashed", "TP Line Style", options = ["Solid", "Dashed", "Dotted"], group = GRP_RISK,
+     tooltip = "Style for TP1/TP2/TP3. On hit, a TP line turns solid teal.")
+
+// ── Liquidity ───────────────────────────────────────────────
+showLiquidityInput = input.bool(true, "Show Resting Liquidity (BSL/SSL)", group = GRP_LIQ,
+     tooltip = "Mark un-swept swing highs as Buy-Side Liquidity (BSL) and un-swept swing lows as Sell-Side Liquidity (SSL). A level disappears once it is swept.")
+maxLiqInput        = input.int(6, "Max Liquidity Levels / Side", minval = 1, maxval = 25, group = GRP_LIQ,
+     tooltip = "Show only the N most recent un-swept levels per side (keeps the chart clean).")
+liqExtendInput     = input.int(10, "Liquidity Line Extend (bars)", minval = 0, maxval = 100, group = GRP_LIQ,
+     tooltip = "How far past the current bar to project resting-liquidity lines.")
+showLiqLabelsInput = input.bool(true, "Show BSL/SSL Labels", group = GRP_LIQ,
+     tooltip = "Tag each resting-liquidity line BSL / SSL.")
+showEqualsInput    = input.bool(true, "Show Equal Highs/Lows (EQH/EQL)", group = GRP_LIQ,
+     tooltip = "Connect consecutive near-equal swing highs/lows — prime liquidity magnets and the most common sweep targets.")
+eqTolInput         = input.float(0.15, "Equal H/L Tolerance (×ATR)", minval = 0.02, maxval = 1.0, step = 0.01, group = GRP_LIQ,
+     tooltip = "Two swings count as 'equal' if within this fraction of ATR.\nLower = stricter (only very tight equals).")
+showTargetInput    = input.bool(true, "Show Liquidity Target (on entry)", group = GRP_LIQ,
+     tooltip = "On each entry, project a line to the nearest opposite un-swept liquidity — the logical draw-on-liquidity objective.")
+
+// ── Visual ──────────────────────────────────────────────────
+themeInput           = input.string("Auto", "Theme", options = ["Auto", "Dark", "Light"], group = GRP_VISUAL,
+     tooltip = "Chart color theme.\n• Auto: detect from chart background\n• Dark / Light: force a palette")
+showSweepsInput      = input.bool(true,  "Show Raw Sweep Marks",  group = GRP_VISUAL,
+     tooltip = "Small × at the wick where liquidity was grabbed (shown even while in a trade).")
+showSweepLineInput   = input.bool(true,  "Show Swept Extremum Line", group = GRP_VISUAL,
+     tooltip = "Horizontal line at the swing high/low that was swept, drawn from where that swing formed to the sweep bar.")
+sweepLineExtendInput = input.int(8, "Swept Line Extend (bars)", minval = 0, maxval = 100, group = GRP_VISUAL,
+     tooltip = "How many bars to extend the swept-level line past the sweep bar (swept liquidity often acts as future S/R).")
+showSweepPenInput    = input.bool(true,  "Show Sweep Penetration", group = GRP_VISUAL,
+     tooltip = "Highlight the wick segment that pierced beyond the level — the depth of the liquidity grab.")
+maxSweepVisInput     = input.int(15, "Max Sweep Drawings", minval = 1, maxval = 60, group = GRP_VISUAL,
+     tooltip = "Cap on stored swept-level / penetration drawings. Oldest are removed first.")
+showSignalsInput     = input.bool(true,  "Show Buy/Sell Signals", group = GRP_VISUAL,
+     tooltip = "Print Long ▲ / Short ▼ markers when a trade opens.")
+showScoreLabelsInput = input.bool(false, "Show Score Labels", group = GRP_VISUAL,
+     tooltip = "Floating 0-100 score next to each qualifying sweep.")
+showLevelInput       = input.bool(true,  "Show Swept Level Line", group = GRP_VISUAL,
+     tooltip = "Line marking the liquidity level taken by the active trade.")
+labelFontSizeInput   = input.string("Small", "SL/TP Label Font Size",
+     options = ["Tiny", "Small", "Normal", "Large", "Huge"], group = GRP_VISUAL,
+     tooltip = "Font size for SL/TP/Entry labels.")
+showWatermarkInput   = input.bool(true,  "Show Watermark", group = GRP_VISUAL,
+     tooltip = "Display 'WillyAlgoTrader' watermark on chart.")
+
+// ── Dashboard ───────────────────────────────────────────────
+showDashInput      = input.bool(true, "Show Dashboard", group = GRP_DASH)
+dashPosStr         = input.string("Top Right", "Dashboard Position",
+     options = ["Top Left", "Top Right", "Bottom Left", "Bottom Right", "Middle Right"], group = GRP_DASH)
+dashFontSizeInput  = input.string("Small", "Dashboard Font Size",
+     options = ["Small", "Normal", "Large", "Huge"], group = GRP_DASH,
+     tooltip = "Font size for the dashboard table. Section dividers and the\nversion footer render one step smaller to preserve hierarchy.")
+showMarketSecInput = input.bool(true, "  ├ Market section", group = GRP_DASH,
+     tooltip = "Trend, HTF bias, Signal, Last sweep, Timeframe.")
+showTradeSecInput  = input.bool(true, "  ├ Trade section", group = GRP_DASH,
+     tooltip = "SL, TP1-3, R:R, SL distance. Collapses to one row when flat.")
+showStatsSecInput  = input.bool(true, "  └ Stats section", group = GRP_DASH,
+     tooltip = "Trades, W/L, Win Rate (+gauge), recent Form.")
+
+// ── Alerts ──────────────────────────────────────────────────
+webhookInput        = input.bool(false, "Webhook JSON Format", group = GRP_ALERT,
+     tooltip = "Send entry alerts as JSON for webhook / autotrading.")
+showSlHitAlertInput = input.bool(true,  "Alert on SL Hit", group = GRP_ALERT,
+     tooltip = "Fire an alert when price hits the active stop-loss.")
+alertTpHitInput     = input.bool(false, "Alert on TP / Break-Even", group = GRP_ALERT,
+     tooltip = "Fire alerts when TP1/TP2/TP3 are touched and on break-even.")
+
+// ── Colors ──────────────────────────────────────────────────
+bullColorInput = input.color(#00E676, "Bull", inline = "c", group = GRP_COLORS)
+bearColorInput = input.color(#FF5252, "Bear", inline = "c", group = GRP_COLORS)
+
+// ══════════════════════════════════════════════════════════
+// 3. THEME DETECTION & COLORS
+// ══════════════════════════════════════════════════════════
+isDark = switch themeInput
+    "Dark"  => true
+    "Light" => false
+    =>         color.r(chart.bg_color) < 128
+
+BULL_COLOR = bullColorInput
+BEAR_COLOR = bearColorInput
+
+BULL_TEXT    = isDark ? #00E676 : #00A152
+BEAR_TEXT    = isDark ? #FF5252 : #D32F2F
+NEUTRAL_TEXT = isDark ? #FFEB3B : #F57F17
+
+BULL_LABEL_TEXT = #004D25
+BEAR_LABEL_TEXT = #FFFFFF
+
+TEXT_COLOR    = isDark ? #E0E0E0                : #1A1A1A
+TEXT_MUTED    = isDark ? color.new(#9E9E9E, 0)  : color.new(#757575, 0)
+TABLE_BG      = isDark ? color.new(#131722, 5)  : color.new(#FFFFFF, 5)
+TABLE_ROW_ALT = isDark ? color.new(#1C2030, 0)  : color.new(#F0F4F8, 0)
+TABLE_BORDER  = isDark ? color.new(#2A2E39, 0)  : color.new(#D0D0D0, 0)
+HEADER_TEXT   = #FFFFFF
+WM_COLOR      = isDark ? color.new(#FFFFFF, 80) : color.new(#000000, 80)
+
+HEADER_BG_BULL = color.new(#0F6E56, 0)
+HEADER_BG_BEAR = color.new(#A32D2D, 0)
+HEADER_BG_FLAT = color.new(#2962FF, 0)
+
+// Premium, muted, theme-aware risk palette
+SL_COLOR       = isDark ? color.new(#E57373, 0)  : color.new(#B71C1C, 0)
+TP1_COLOR      = isDark ? color.new(#66BB6A, 30) : color.new(#388E3C, 30)
+TP2_COLOR      = isDark ? color.new(#66BB6A, 40) : color.new(#388E3C, 40)
+TP3_COLOR      = isDark ? color.new(#66BB6A, 0)  : color.new(#388E3C, 0)
+ENTRY_COLOR    = isDark ? color.new(#5C8AAE, 0)  : color.new(#34495E, 0)
+TP_LABEL_COLOR = isDark ? color.new(#66BB6A, 0)  : color.new(#388E3C, 0)
+TP_HIT_COLOR   = isDark ? color.new(#4DB6AC, 0)  : color.new(#00695C, 0)
+BE_COLOR       = isDark ? color.new(#FFA726, 0)  : color.new(#E65100, 0)
+LABEL_TEXT     = isDark ? #1A1A1A                : #FFFFFF
+FORM_COLOR     = isDark ? #5C8AAE                : #34495E
+LEVEL_COLOR    = isDark ? color.new(#B0BEC5, 30) : color.new(#546E7A, 30)
+
+// Liquidity family — cohesive steel hue; gold accent for the objective
+LIQ_COLOR      = isDark ? color.new(#90A4AE, 40) : color.new(#607D8B, 40)
+LIQ_TEXT       = isDark ? #B0BEC5                : #455A64
+EQ_COLOR       = isDark ? color.new(#B0BEC5, 0)  : color.new(#455A64, 0)
+EQ_TEXT        = isDark ? #ECEFF1                : #263238
+TARGET_COLOR   = isDark ? color.new(#FFCA28, 15) : color.new(#F9A825, 15)
+TARGET_TEXT    = isDark ? #FFD54F                : #F57F17
+
+// ══════════════════════════════════════════════════════════
+// 4. FUNCTIONS & HELPERS
+// ══════════════════════════════════════════════════════════
+// Sweep quality score 0-100. dir: 1 = bullish (low swept), -1 = bearish (high swept).
+f_score(int dir, float lvl, float atrv, float volComp, float htfComp) =>
+    float rng = high - low
+    float sc  = 0.0
+    if rng > 0 and atrv > 0 and not na(lvl)
+        float wick     = dir == 1 ? math.min(open, close) - low : high - math.max(open, close)
+        float reclaim  = dir == 1 ? close - lvl : lvl - close
+        float closePos = (close - low) / rng
+        float cpComp   = dir == 1 ? closePos : 1.0 - closePos
+        float wickComp = math.min(math.max(wick, 0.0) / atrv, 1.0)
+        float rclComp  = math.min(math.max(reclaim, 0.0) / atrv, 1.0)
+        sc := (wickComp * 0.30 + rclComp * 0.25 + cpComp * 0.20 + volComp * 0.15 + htfComp * 0.10) * 100.0
+    sc
+
+buildGauge(float value, float maxVal, int width) =>
+    string result = ""
+    int filled = maxVal <= 0 ? 0 : math.round(math.min(width, math.max(0.0, value / maxVal * width)))
+    for i = 0 to width - 1
+        result += i < filled ? "▰" : "▱"
+    result
+
+fmtPrice(float v) =>
+    na(v) ? "—" : str.tostring(v, format.mintick)
+
+formatPctFromEntry(float level, float entry) =>
+    string res = ""
+    if showPctOnLabelsInput and not na(level) and not na(entry) and entry != 0
+        float pct  = (level - entry) / entry * 100.0
+        string sign = pct >= 0 ? "+" : ""
+        res := " (" + sign + str.tostring(pct, "#.##") + "%)"
+    res
+
+lineStyleFromString(string s) =>
+    s == "Dashed" ? line.style_dashed : s == "Dotted" ? line.style_dotted : line.style_solid
+
+sizeFromString(string s) =>
+    s == "Tiny" ? size.tiny : s == "Small" ? size.small : s == "Normal" ? size.normal : s == "Large" ? size.large : s == "Huge" ? size.huge : size.small
+
+// One step smaller — used for section dividers and the version footer
+sizeDownFromString(string s) =>
+    s == "Tiny" ? size.tiny : s == "Small" ? size.tiny : s == "Normal" ? size.small : s == "Large" ? size.normal : s == "Huge" ? size.large : size.tiny  also prove this works 
+
+</USER_REQUEST>
+<ADDITIONAL_METADATA>
+The current local time is: 2026-09-09T09:53:00+03:00.
+</ADDITIONAL_METADATA>

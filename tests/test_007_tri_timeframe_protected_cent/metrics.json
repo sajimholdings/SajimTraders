@@ -1,0 +1,21 @@
+{
+  "symbol": "XAUUSD_TRI_TIMEFRAME_MT5",
+  "style": "TRI_GATE_PROTECTED_CENT",
+  "initial_balance": 4.0,
+  "final_balance": 5.2,
+  "net_profit_usd": 1.2,
+  "roi_pct": 30.02,
+  "total_trades": 98,
+  "winning_trades": 35,
+  "losing_trades": 63,
+  "win_rate_pct": 35.71,
+  "profit_factor": 1.08,
+  "max_drawdown_pct": 14.53,
+  "max_drawdown_usd": 0.8,
+  "initial_balance_cents": 400.0,
+  "final_balance_cents": 520.1,
+  "net_profit_cents": 120.1,
+  "tri_aligned_catches": 99,
+  "wait_decisions": 445,
+  "wait_percentage": 81.8
+}

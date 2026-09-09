@@ -1,0 +1,15 @@
+{
+  "symbol": "XAUUSD",
+  "style": "INTRADAY",
+  "initial_balance": 400.0,
+  "final_balance": 562.44,
+  "net_profit_usd": 162.44,
+  "roi_pct": 40.61,
+  "total_trades": 90,
+  "winning_trades": 45,
+  "losing_trades": 45,
+  "win_rate_pct": 50.0,
+  "profit_factor": 1.19,
+  "max_drawdown_pct": 37.86,
+  "max_drawdown_usd": 163.35
+}

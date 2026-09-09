@@ -1,0 +1,15 @@
+{
+  "symbol": "MULTI_ASSET_PORTFOLIO",
+  "style": "MARKET_MILKER_FLIP",
+  "initial_balance": 400.0,
+  "final_balance": 213.9,
+  "net_profit_usd": -186.1,
+  "roi_pct": -46.52,
+  "total_trades": 229,
+  "winning_trades": 84,
+  "losing_trades": 145,
+  "win_rate_pct": 36.68,
+  "profit_factor": 0.88,
+  "max_drawdown_pct": 61.49,
+  "max_drawdown_usd": 245.95
+}

@@ -1,0 +1,52 @@
+{
+  "symbol": "COLLECTIVE_5_PAIRS",
+  "style": "INTRADAY_COLLECTIVE",
+  "initial_balance": 400.0,
+  "final_balance": 456.48,
+  "net_profit_usd": 56.48,
+  "roi_pct": 14.12,
+  "total_trades": 272,
+  "winning_trades": 118,
+  "losing_trades": 154,
+  "win_rate_pct": 43.38,
+  "profit_factor": 1.05,
+  "max_drawdown_pct": 53.25,
+  "max_drawdown_usd": 225.6,
+  "pair_breakdown": {
+    "XAUUSD": {
+      "trades": 90,
+      "wins": 45,
+      "win_rate": 50.0,
+      "net_pnl": 162.44,
+      "profit_factor": 1.19
+    },
+    "EURUSD": {
+      "trades": 16,
+      "wins": 0,
+      "win_rate": 0.0,
+      "net_pnl": -56.0,
+      "profit_factor": 0.0
+    },
+    "GBPUSD": {
+      "trades": 30,
+      "wins": 9,
+      "win_rate": 30.0,
+      "net_pnl": -35.3,
+      "profit_factor": 0.52
+    },
+    "USDJPY": {
+      "trades": 112,
+      "wins": 54,
+      "win_rate": 48.21,
+      "net_pnl": -13.98,
+      "profit_factor": 0.86
+    },
+    "US30": {
+      "trades": 24,
+      "wins": 10,
+      "win_rate": 41.67,
+      "net_pnl": -0.67,
+      "profit_factor": 0.97
+    }
+  }
+}

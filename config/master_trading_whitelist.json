@@ -1,0 +1,55 @@
+{
+  "_meta": {
+    "title": "SAJIM QUANT LABS - SINGLE SOURCE OF TRUTH MASTER TRADING WHITELIST",
+    "architect": "Jimmy Mathu",
+    "description": "Any change in this JSON file is automatically and immediately hot-reloaded across Sajim V1, V2, and all Strategy Cartridges."
+  },
+  "live_trading_whitelist": [
+    "XAUUSD",
+    "XAGUSD",
+    "GBPJPY",
+    "BTCUSD"
+  ],
+  "paper_testing_watchlist": [
+    "EURUSD",
+    "USDJPY",
+    "CADJPY",
+    "NZDJPY",
+    "EURJPY",
+    "AUDJPY",
+    "USDCAD",
+    "NZDUSD",
+    "GBPUSD",
+    "AUDUSD",
+    "ETHUSD"
+  ],
+  "toxic_blacklist": [
+    "XAUGBP",
+    "CADCHF",
+    "AUDCHF",
+    "NZDCHF",
+    "AUDNZD",
+    "GBPCHF"
+  ],
+  "strategies": {
+    "V1_BEEP": {
+      "XAUUSD": ["M15", "M30"],
+      "GBPJPY": ["H1"]
+    },
+    "MirageLiquiditySweep": {
+      "XAUUSD": ["M15", "H1"],
+      "XAGUSD": ["M15", "H1"],
+      "GBPJPY": ["H1"],
+      "BTCUSD": ["M15", "H1"]
+    },
+    "YoungSurgeContinuation": {
+      "XAUUSD": ["M15", "H1"],
+      "GBPJPY": ["H1"],
+      "BTCUSD": ["H1"]
+    },
+    "ExhaustionMeanReversion": {
+      "XAUUSD": ["H1"],
+      "GBPJPY": ["H1"]
+    }
+  }
+}

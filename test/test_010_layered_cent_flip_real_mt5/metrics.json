@@ -1,0 +1,40 @@
+{
+  "test_id": "TEST_010",
+  "symbol": "XAUUSD",
+  "timeframe": "M15",
+  "candles_analyzed": 1000,
+  "total_trades": 273,
+  "winning_trades": 195,
+  "win_rate_pct": 71.43,
+  "total_flips_completed": 38,
+  "avg_flip_duration_hours": 9.36,
+  "avg_trade_duration_minutes": 46.43,
+  "max_consecutive_losses": 6,
+  "max_drawdown_pct": 123.25,
+  "layer_breakdown": {
+    "DIAMOND": {
+      "trades": 0,
+      "wins": 0,
+      "losses": 0,
+      "pnl": 0.0
+    },
+    "RARE": {
+      "trades": 94,
+      "wins": 87,
+      "losses": 7,
+      "pnl": 17481.41
+    },
+    "CERTIFIED": {
+      "trades": 93,
+      "wins": 81,
+      "losses": 12,
+      "pnl": 12654.039999999985
+    },
+    "THIEF_FADER": {
+      "trades": 86,
+      "wins": 27,
+      "losses": 59,
+      "pnl": -1050.4999999999973
+    }
+  }
+}

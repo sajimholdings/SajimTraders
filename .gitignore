@@ -1,0 +1,33 @@
+# Python bytecode & cache
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Private IP Vault (Strictly protected by BEEP Licensing Agreement)
+vault/
+
+# Logs & Runtime telemetry dumps
+*.log
+overnight_execution.log
+
+# Large Archives & Binaries
+*.zip
+*.tar.gz
+
+# Environment variables & Private Keys
+.env
+.env.local
+*.pem
+*.key
+
+# IDE / Editor artifacts
+.vscode/
+.idea/
+*.swp
+
+# OS generated files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+.DS_Store

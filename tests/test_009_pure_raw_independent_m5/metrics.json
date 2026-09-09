@@ -1,0 +1,18 @@
+{
+  "symbol": "XAUUSD_M5_RAW_INDEPENDENT",
+  "style": "PURE_RAW_BEEP_SOVEREIGN",
+  "initial_balance": 4.0,
+  "final_balance": 1.89,
+  "net_profit_usd": -2.11,
+  "roi_pct": -52.81,
+  "total_trades": 188,
+  "winning_trades": 64,
+  "losing_trades": 124,
+  "win_rate_pct": 34.04,
+  "profit_factor": 0.62,
+  "max_drawdown_pct": 63.71,
+  "max_drawdown_usd": 2.69,
+  "initial_balance_cents": 400.0,
+  "final_balance_cents": 188.76,
+  "net_profit_cents": -211.24
+}

@@ -1,0 +1,15 @@
+{
+  "symbol": "XAUUSD",
+  "style": "SWING",
+  "initial_balance": 400.0,
+  "final_balance": 483.82,
+  "net_profit_usd": 83.82,
+  "roi_pct": 20.95,
+  "total_trades": 73,
+  "winning_trades": 42,
+  "losing_trades": 31,
+  "win_rate_pct": 57.53,
+  "profit_factor": 1.09,
+  "max_drawdown_pct": 43.0,
+  "max_drawdown_usd": 176.53
+}

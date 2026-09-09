@@ -1,0 +1,19 @@
+{
+  "symbol": "XAUUSD_M5_BINARY_QUANT",
+  "style": "BINARY_STATE_INVERSION_SAR",
+  "initial_balance": 4.0,
+  "final_balance": 3.7,
+  "net_profit_usd": -0.3,
+  "roi_pct": -7.5,
+  "total_trades": 215,
+  "winning_trades": 80,
+  "losing_trades": 135,
+  "win_rate_pct": 37.21,
+  "profit_factor": 0.95,
+  "max_drawdown_pct": 33.93,
+  "max_drawdown_usd": 1.69,
+  "initial_balance_cents": 400.0,
+  "final_balance_cents": 370.01,
+  "net_profit_cents": -29.99,
+  "sar_flips_count": 98
+}

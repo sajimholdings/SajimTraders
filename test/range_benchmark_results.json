@@ -1,0 +1,56 @@
+{
+  "EURUSD": {
+    "static_trend": {
+      "total_trades": 12,
+      "wins": 1,
+      "losses": 11,
+      "win_rate": 8.3,
+      "net_pnl": -14.25,
+      "max_dd": 5.25
+    },
+    "hummingbird_range": {
+      "total_trades": 42,
+      "wins": 25,
+      "losses": 17,
+      "win_rate": 59.5,
+      "net_pnl": -9.97,
+      "max_dd": 5.27
+    }
+  },
+  "GBPUSD": {
+    "static_trend": {
+      "total_trades": 14,
+      "wins": 4,
+      "losses": 10,
+      "win_rate": 28.6,
+      "net_pnl": 45.0,
+      "max_dd": 2.18
+    },
+    "hummingbird_range": {
+      "total_trades": 48,
+      "wins": 32,
+      "losses": 16,
+      "win_rate": 66.7,
+      "net_pnl": 5.34,
+      "max_dd": 5.45
+    }
+  },
+  "USDJPY": {
+    "static_trend": {
+      "total_trades": 26,
+      "wins": 3,
+      "losses": 23,
+      "win_rate": 11.5,
+      "net_pnl": -8.29,
+      "max_dd": 6.7
+    },
+    "hummingbird_range": {
+      "total_trades": 38,
+      "wins": 20,
+      "losses": 18,
+      "win_rate": 52.6,
+      "net_pnl": -24.55,
+      "max_dd": 6.19
+    }
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "symbol": "MULTI_ASSET_NARRATIVE",
+  "style": "NARRATIVE_ASYMMETRIC_FLIP",
+  "initial_balance": 400.0,
+  "final_balance": 445.73,
+  "net_profit_usd": 45.73,
+  "roi_pct": 11.43,
+  "total_trades": 72,
+  "winning_trades": 12,
+  "losing_trades": 60,
+  "win_rate_pct": 16.67,
+  "profit_factor": 0.68,
+  "max_drawdown_pct": 31.47,
+  "max_drawdown_usd": 183.56
+}
