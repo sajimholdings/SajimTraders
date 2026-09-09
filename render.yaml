@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: sajim-traders
+    runtime: python
+    plan: starter
+    buildCommand: ""
+    startCommand: "python web/server.py"
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.0
