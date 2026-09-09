@@ -1,26 +1,26 @@
 {
-  "timestamp": "2026-09-09T11:20:36.962209",
+  "timestamp": "2026-09-09T16:43:18.480816",
   "account": {
-    "balance": 146.75,
-    "equity": 147.06,
-    "free_margin": 141.62,
-    "margin_level_pct": 2703.31,
+    "balance": 133.53,
+    "equity": 146.64,
+    "free_margin": 140.72,
+    "margin_level_pct": 2477.03,
     "currency": "USD"
   },
   "pnl": {
-    "today_closed": 0.0,
-    "today_floating": 0.31,
-    "combined_daily_net": 0.31
+    "today_closed": -8.55,
+    "today_floating": 13.11,
+    "combined_daily_net": 4.56
   },
   "circuit_breaker": {
-    "active": false,
-    "reason": ""
+    "active": true,
+    "reason": "Combined daily net loss (-8.55 USD) >= 5% limit (6.68 USD)"
   },
   "concurrency": {
-    "total_open": 3,
+    "total_open": 4,
     "max_combined": 6,
-    "v1_count": 1,
-    "v2_count": 2,
+    "v1_count": 0,
+    "v2_count": 4,
     "other_count": 0
   },
   "toggles": {
@@ -28,42 +28,53 @@
     "v2_enabled": true
   },
   "positions": {
-    "v1": [
+    "v1": [],
+    "v2": [
       {
-        "ticket": 706955640,
+        "ticket": 707119821,
         "symbol": "GBPJPY",
         "type": "SELL",
         "volume": 0.01,
-        "price_open": 207.60500000000002,
-        "sl": 208.385,
-        "tp": 205.535,
-        "profit": -1.6600000000000001,
-        "magic": 777999,
-        "comment": "Sajim_DIAMOND"
-      }
-    ],
-    "v2": [
-      {
-        "ticket": 706955671,
-        "symbol": "BTCUSD",
-        "type": "BUY",
-        "volume": 0.01,
-        "price_open": 79327.89,
-        "sl": 78802.22,
-        "tp": 80664.9,
-        "profit": 1.5899999999999999,
+        "price_open": 207.99,
+        "sl": 208.534,
+        "tp": 206.358,
+        "profit": 0.28,
         "magic": 888222,
         "comment": "Sajim_V2_YoungSurge"
       },
       {
-        "ticket": 706963265,
+        "ticket": 707120237,
+        "symbol": "GBPJPY",
+        "type": "SELL",
+        "volume": 0.01,
+        "price_open": 207.993,
+        "sl": 208.537,
+        "tp": 206.361,
+        "profit": 0.3,
+        "magic": 888222,
+        "comment": "Sajim_V2_YoungSurge"
+      },
+      {
+        "ticket": 707274239,
         "symbol": "BTCUSD",
         "type": "BUY",
         "volume": 0.01,
-        "price_open": 79449.16,
-        "sl": 78963.59,
-        "tp": 80665.87,
-        "profit": 0.38,
+        "price_open": 79007.44,
+        "sl": 78443.14,
+        "tp": 80460.35,
+        "profit": 1.6600000000000001,
+        "magic": 888222,
+        "comment": "Sajim_V2_YoungSurge"
+      },
+      {
+        "ticket": 707446790,
+        "symbol": "XAUUSD",
+        "type": "BUY",
+        "volume": 0.01,
+        "price_open": 4402.05,
+        "sl": 4380.41,
+        "tp": 4465.42,
+        "profit": 10.87,
         "magic": 888222,
         "comment": "Sajim_V2_YoungSurge"
       }

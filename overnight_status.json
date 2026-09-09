@@ -1,39 +1,19 @@
 {
-  "timestamp": "2026-09-09 11:20:36",
+  "timestamp": "2026-09-09 15:48:25",
   "pipeline": "DATA -> BEEP -> SIGNAL -> SAJIM -> ENTRY -> MANAGEMENT -> PNL",
   "server": "Headway-Real",
   "account": 17537803,
-  "equity": 147.05,
-  "balance": 146.75,
-  "free_margin": 141.61,
-  "active_bot_positions": 1,
+  "equity": 137.54,
+  "balance": 133.53,
+  "free_margin": 131.62,
+  "active_bot_positions": 0,
   "consecutive_wins": 0,
-  "cluster_streaks": {},
+  "cluster_streaks": {
+    "JPY": 0
+  },
   "total_trades": 0,
   "active_signals_count": 0,
   "top_signals": [],
-  "open_positions": [
-    {
-      "ticket": 706955640,
-      "time": 1788951561,
-      "time_msc": 1788951561730,
-      "time_update": 1788951561,
-      "time_update_msc": 1788951561730,
-      "type": 1,
-      "magic": 777999,
-      "identifier": 706955640,
-      "reason": 3,
-      "volume": 0.01,
-      "price_open": 207.60500000000002,
-      "sl": 208.385,
-      "tp": 205.535,
-      "price_current": 207.861,
-      "swap": 0.0,
-      "profit": -1.67,
-      "symbol": "GBPJPY",
-      "comment": "Sajim_DIAMOND",
-      "external_id": ""
-    }
-  ],
+  "open_positions": [],
   "mode": "LIVE_EXECUTION"
 }

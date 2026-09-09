@@ -2,26 +2,29 @@
   "_meta": {
     "title": "SAJIM QUANT LABS - SINGLE SOURCE OF TRUTH MASTER TRADING WHITELIST",
     "architect": "Jimmy Mathu",
-    "description": "Any change in this JSON file is automatically and immediately hot-reloaded across Sajim V1, V2, and all Strategy Cartridges."
+    "description": "Any change in this JSON file is automatically and immediately hot-reloaded across Sajim V1, V2, Confluence Ensemble, and all Strategy Cartridges.",
+    "last_empirical_audit": "2026-09-09 Headway Real MT5 Grand Confluence Audit (docs/GRAND_CONFLUENCE_AUDIT_REPORT.md)"
   },
   "live_trading_whitelist": [
     "XAUUSD",
     "XAGUSD",
+    "XAUAUD",
     "GBPJPY",
-    "BTCUSD"
+    "EURJPY",
+    "BTCUSD",
+    "ETHUSD",
+    "SOLUSD",
+    "USDCAD",
+    "USDCHF",
+    "EURAUD"
   ],
   "paper_testing_watchlist": [
     "EURUSD",
     "USDJPY",
     "CADJPY",
-    "NZDJPY",
-    "EURJPY",
-    "AUDJPY",
-    "USDCAD",
-    "NZDUSD",
-    "GBPUSD",
     "AUDUSD",
-    "ETHUSD"
+    "AUDJPY",
+    "EURGBP"
   ],
   "toxic_blacklist": [
     "XAUGBP",
@@ -29,27 +32,62 @@
     "AUDCHF",
     "NZDCHF",
     "AUDNZD",
-    "GBPCHF"
+    "GBPCHF",
+    "NZDJPY",
+    "GBPUSD_M15",
+    "GBPJPY_M15",
+    "AUDJPY_H1",
+    "EURUSD_M1",
+    "GBPUSD_M1",
+    "AUDUSD_M1",
+    "USDCAD_M1",
+    "USDCHF_M1",
+    "CADJPY_M1"
   ],
   "strategies": {
     "V1_BEEP": {
-      "XAUUSD": ["M15", "M30"],
-      "GBPJPY": ["H1"]
+      "XAUUSD": ["M1", "M15", "M30"],
+      "GBPJPY": ["H1"],
+      "EURJPY": ["M1", "H1"]
     },
     "MirageLiquiditySweep": {
-      "XAUUSD": ["M15", "H1"],
+      "XAUUSD": ["M1", "M5", "M15", "H1"],
+      "EURJPY": ["M1", "M5", "M15", "H1"],
       "XAGUSD": ["M15", "H1"],
+      "XAUAUD": ["H1"],
       "GBPJPY": ["H1"],
-      "BTCUSD": ["M15", "H1"]
+      "BTCUSD": ["H1"],
+      "ETHUSD": ["M15", "H1"],
+      "SOLUSD": ["H1"]
     },
     "YoungSurgeContinuation": {
-      "XAUUSD": ["M15", "H1"],
+      "XAUUSD": ["M1", "M15", "H1"],
+      "EURJPY": ["M1", "H1"],
       "GBPJPY": ["H1"],
-      "BTCUSD": ["H1"]
+      "BTCUSD": ["H1"],
+      "ETHUSD": ["H1"],
+      "USDCAD": ["H1"],
+      "USDCHF": ["H1"]
     },
     "ExhaustionMeanReversion": {
-      "XAUUSD": ["H1"],
-      "GBPJPY": ["H1"]
+      "XAUUSD": ["M1", "H1"],
+      "EURJPY": ["M1", "H1"],
+      "GBPJPY": ["H1"],
+      "EURAUD": ["H1"],
+      "USDCAD": ["H1"]
+    },
+    "GrandConfluence": {
+      "XAUUSD": ["M1", "M5", "M15", "H1"],
+      "EURJPY": ["M1", "M5", "M15", "H1"],
+      "XAGUSD": ["M15", "H1"],
+      "XAUAUD": ["H1"],
+      "BTCUSD": ["H1"],
+      "ETHUSD": ["M15", "H1"],
+      "SOLUSD": ["H1"],
+      "GBPJPY": ["H1"],
+      "USDCAD": ["H1"],
+      "USDCHF": ["H1"],
+      "EURAUD": ["H1"]
     }
   }
 }
