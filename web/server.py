@@ -111,6 +111,8 @@ class SajimTradersHandler(SimpleHTTPRequestHandler):
             self.handle_api_edge_matrix()
         elif path == "/api/community":
             self.handle_api_community()
+        elif path == "/api/landing":
+            self.handle_api_landing()
         elif path.startswith("/api/"):
             self._send_json({"error": "Endpoint not found", "path": path}, 404)
         else:
@@ -315,6 +317,29 @@ class SajimTradersHandler(SimpleHTTPRequestHandler):
             "vip_status": "ACTIVE",
             "founder": "Jimmy Mathu",
             "mission": "Scalable institutional edge extraction & trader compounding",
+        })
+
+    def handle_api_landing(self):
+        """High-level public statistics for the brand showcase."""
+        matrix_status = load_json_safe(EDGE_MATRIX_STATUS_FILE, {})
+        self._send_json({
+            "brand": "Sajim Traders",
+            "tagline": "Scale-Invariant Institutional Quantitative Systems & Autonomous Execution",
+            "lead_architect": "Jimmy Mathu",
+            "stats": {
+                "rare_layer_winrate": "92.6%",
+                "certified_layer_winrate": "87.1%",
+                "backtested_fronts": matrix_status.get("total_completed_fronts", 204),
+                "top_profit_factor": 1.99,
+                "top_pair": "USDCAD (M15)",
+                "target_rr": "1:3.5",
+                "flips_target": "3 Trades ($4 -> $10+ USC Compounding)"
+            },
+            "community": {
+                "channel_username": "@sajimtraders",
+                "channel_link": "https://t.me/sajimtraders",
+                "status": "ONLINE"
+            }
         })
 
     def handle_sammy_check(self, body: dict):

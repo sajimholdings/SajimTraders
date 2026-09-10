@@ -59,6 +59,8 @@ class SajimDualOrchestrator:
     ):
         self.scan_interval = scan_interval_seconds
         self.max_combined = max_combined_positions
+        self.max_v1_positions = max_v1_positions
+        self.max_v2_positions = max_v2_positions
         self.dry_run = dry_run
         self.target_account = target_account
 
@@ -67,6 +69,8 @@ class SajimDualOrchestrator:
             max_combined_positions=max_combined_positions,
             status_file_path=os.path.join(BASE_DIR, "coexistence_status.json"),
         )
+        if max_v1_positions <= 0:
+            self.gatekeeper.v1_enabled = False
 
         # Sajim V1 Production Server Daemon
         self.v1_server = SajimOvernightServer(
@@ -90,8 +94,17 @@ class SajimDualOrchestrator:
 
     def connect(self) -> bool:
         """Initializes MT5 terminal and binds both V1 and V2 engines."""
-        terminal_path = r"C:\Program Files\MetaTrader 5\terminal64.exe"
-        if not mt5.initialize(path=terminal_path, timeout=15000):
+        # Connect to currently running MT5 terminal first; fallback to launch Headway if closed
+        init_ok = mt5.initialize()
+        if not init_ok:
+            headway_path = r"C:\Program Files\Headway MT5 Terminal\terminal64.exe"
+            if os.path.exists(headway_path):
+                init_ok = mt5.initialize(path=headway_path, timeout=10000)
+            else:
+                terminal_path = r"C:\Program Files\MetaTrader 5\terminal64.exe"
+                init_ok = mt5.initialize(path=terminal_path, timeout=5000) if os.path.exists(terminal_path) else False
+
+        if not init_ok:
             logger.critical(f"Failed to initialize MT5 terminal: {mt5.last_error()}")
             return False
 
@@ -129,10 +142,13 @@ class SajimDualOrchestrator:
             mt5.shutdown()
             return False
 
-        # Initialize V1 Server
-        if not self.v1_server.connect(target_account=target_acc):
-            logger.critical("Failed to connect Sajim V1 Server.")
-            return False
+        # Initialize V1 Server (only if V1 is enabled)
+        if self.max_v1_positions > 0 and self.gatekeeper.v1_enabled:
+            if not self.v1_server.connect(target_account=target_acc):
+                logger.critical("Failed to connect Sajim V1 Server.")
+                return False
+        else:
+            logger.info("[🔇 V1 MUTED] Sajim V1 Server connection bypassed (V2 exclusive mode active).")
 
         # Initialize V2 Bot
         if not self.v2_bot.connect(target_account=target_acc):
@@ -168,8 +184,9 @@ class SajimDualOrchestrator:
         self.sync_gatekeeper()
 
         # 1. Manage Active Positions independently by Magic Number
-        # V1: Streaming tick euthanasia & trailing ratchets
-        self.v1_server.manage_stream_tick()
+        # V1: Streaming tick euthanasia & trailing ratchets (only if active V1 trades exist)
+        if len(self.gatekeeper.v1_positions) > 0:
+            self.v1_server.manage_stream_tick()
         # V2: Two-stage asymmetric ratchets (+1.5R BE, +2.2R Lock)
         self.v2_bot.sync_pnl_and_streaks()
         self.v2_bot.manage_open_positions()
@@ -177,8 +194,8 @@ class SajimDualOrchestrator:
         # 2. Synchronize Gatekeeper after position modifications
         self.sync_gatekeeper()
 
-        # 3. Scan & Entry for V1
-        if self.gatekeeper.v1_enabled and not self.gatekeeper.circuit_breaker_active:
+        # 3. Scan & Entry for V1 (Bypassed if V1 is muted / max_v1 is 0)
+        if self.gatekeeper.v1_enabled and self.max_v1_positions > 0 and not self.gatekeeper.circuit_breaker_active:
             try:
                 self.v1_server.scan_and_entry_cycle()
             except Exception as e:

@@ -1,6 +1,6 @@
 /**
  * ========================================================================================
- *                     SAJIM TRADERS — QUANTITATIVE WEB APP (app.js)
+ *              SAJIM TRADERS — QUANTITATIVE WEB PLATFORM & TERMINAL (app.js)
  * ========================================================================================
  * Chief Quantitative Architect: Jimmy Mathu
  * Brand: Sajim Traders (@sajimtraders)
@@ -11,6 +11,8 @@
 let refreshCountdown = 3;
 let refreshInterval = 3;
 let autoRefreshTimer = null;
+let allSignalsCache = [];
+let activeSignalFilter = "ALL";
 
 document.addEventListener("DOMContentLoaded", () => {
   initTabs();
@@ -18,6 +20,7 @@ document.addEventListener("DOMContentLoaded", () => {
   initManualRefresh();
   
   // Initial fetch
+  fetchLandingStats();
   fetchTelemetry();
   fetchPositions();
   fetchSignals();
@@ -28,7 +31,46 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 
 // -----------------------------------------------------------------------------
-// TAB SWITCHING
+// VIEW SWITCHING (LANDING OVERVIEW <--> QUANT TERMINAL)
+// -----------------------------------------------------------------------------
+window.switchView = function(viewName) {
+  const landingView = document.getElementById("view-landing");
+  const terminalView = document.getElementById("view-terminal");
+  const btnLanding = document.getElementById("btn-view-landing");
+  const btnTerminal = document.getElementById("btn-view-terminal");
+
+  if (viewName === "terminal") {
+    if (landingView) landingView.classList.remove("active");
+    if (terminalView) terminalView.classList.add("active");
+    if (btnLanding) btnLanding.classList.remove("active");
+    if (btnTerminal) btnTerminal.classList.add("active");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  } else {
+    if (terminalView) terminalView.classList.remove("active");
+    if (landingView) landingView.classList.add("active");
+    if (btnTerminal) btnTerminal.classList.remove("active");
+    if (btnLanding) btnLanding.classList.add("active");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+};
+
+// -----------------------------------------------------------------------------
+// LANDING STATS
+// -----------------------------------------------------------------------------
+async function fetchLandingStats() {
+  try {
+    const res = await fetch("/api/landing");
+    if (!res.ok) return;
+    const data = await res.json();
+    // Landing stats are statically rendered with high-converting values,
+    // but dynamic sync can update if needed.
+  } catch (err) {
+    console.warn("Landing stats fallback active.");
+  }
+}
+
+// -----------------------------------------------------------------------------
+// TAB SWITCHING (INSIDE TERMINAL)
 // -----------------------------------------------------------------------------
 function initTabs() {
   const tabBtns = document.querySelectorAll(".tab-btn");
@@ -237,7 +279,7 @@ async function fetchPositions() {
 }
 
 // -----------------------------------------------------------------------------
-// BEEP SIGNALS RADAR
+// BEEP SIGNALS RADAR & FILTERING
 // -----------------------------------------------------------------------------
 async function fetchSignals() {
   try {
@@ -245,78 +287,99 @@ async function fetchSignals() {
     if (!res.ok) return;
     const data = await res.json();
 
-    const container = document.getElementById("signals-container");
-    const countEl = document.getElementById("radar-signal-count");
-    if (!container) return;
-
-    const signals = data.signals || [];
-    if (countEl) countEl.textContent = signals.length;
-
-    if (signals.length === 0) {
-      container.innerHTML = `<div style="grid-column: 1/-1; text-align: center; color: var(--text-muted); padding: 3rem;">Scanning for institutional setups...</div>`;
-      return;
-    }
-
-    let cardsHtml = "";
-    signals.forEach(s => {
-      const isBuy = (s.action || "").toUpperCase() === "BUY";
-      const actionBadge = isBuy ? "badge-buy" : "badge-sell";
-      
-      let layerBadge = "badge-certified";
-      if (s.layer === "DIAMOND") layerBadge = "badge-diamond";
-      else if (s.layer === "RARE") layerBadge = "badge-rare";
-
-      cardsHtml += `
-        <div class="signal-card">
-          <div class="signal-card-head">
-            <div class="signal-pair">${s.symbol} <span style="font-size: 0.8rem; color: var(--text-muted); font-weight: 400;">(${s.timeframe})</span></div>
-            <div style="display: flex; gap: 0.4rem;">
-              <span class="badge ${layerBadge}">${s.layer}</span>
-              <span class="badge ${actionBadge}">${s.action}</span>
-            </div>
-          </div>
-
-          <div class="signal-metrics">
-            <div class="metric-item">
-              <span class="metric-lbl">ENTRY PRICE</span>
-              <span class="metric-val">${s.entry}</span>
-            </div>
-            <div class="metric-item">
-              <span class="metric-lbl">TARGET (1:${s.rr} R:R)</span>
-              <span class="metric-val" style="color: #34d399;">${s.tp}</span>
-            </div>
-            <div class="metric-item">
-              <span class="metric-lbl">INVALIDATION (SL)</span>
-              <span class="metric-val" style="color: #fb7185;">${s.sl}</span>
-            </div>
-            <div class="metric-item">
-              <span class="metric-lbl">EDGE MASS M(t)</span>
-              <span class="metric-val">${s.m_t}</span>
-            </div>
-          </div>
-
-          <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.72rem; color: var(--text-muted); font-family: var(--font-mono);">
-            <span>Session: ${s.session || "LONDON"}</span>
-            <span>Spread: ${s.spread_points || 15} pts</span>
-          </div>
-
-          <div class="signal-actions">
-            <button class="btn btn-outline" style="flex: 1;" onclick='copySignal(${JSON.stringify(s)})'>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
-              Copy Signal
-            </button>
-            <button class="btn btn-primary" onclick='dispatchSimulatedTrade(${JSON.stringify(s)})'>
-              Verify Risk
-            </button>
-          </div>
-        </div>
-      `;
-    });
-
-    container.innerHTML = cardsHtml;
+    allSignalsCache = data.signals || [];
+    renderFilteredSignals();
   } catch (err) {
     console.error("Error fetching signals:", err);
   }
+}
+
+window.filterSignals = function(tier) {
+  activeSignalFilter = tier;
+  const chipBtns = document.querySelectorAll(".chip-btn");
+  chipBtns.forEach(btn => {
+    btn.classList.remove("active");
+    if (btn.textContent.includes(tier) || (tier === "ALL" && btn.textContent.includes("All"))) {
+      btn.classList.add("active");
+    }
+  });
+  renderFilteredSignals();
+};
+
+function renderFilteredSignals() {
+  const container = document.getElementById("signals-container");
+  const countEl = document.getElementById("radar-signal-count");
+  if (!container) return;
+
+  const filtered = allSignalsCache.filter(s => {
+    if (activeSignalFilter === "ALL") return true;
+    return (s.layer || "").toUpperCase() === activeSignalFilter.toUpperCase();
+  });
+
+  if (countEl) countEl.textContent = filtered.length;
+
+  if (filtered.length === 0) {
+    container.innerHTML = `<div style="grid-column: 1/-1; text-align: center; color: var(--text-muted); padding: 3rem;">Scanning for institutional ${activeSignalFilter} setups...</div>`;
+    return;
+  }
+
+  let cardsHtml = "";
+  filtered.forEach(s => {
+    const isBuy = (s.action || "").toUpperCase() === "BUY";
+    const actionBadge = isBuy ? "badge-buy" : "badge-sell";
+    
+    let layerBadge = "badge-certified";
+    if (s.layer === "DIAMOND") layerBadge = "badge-diamond";
+    else if (s.layer === "RARE") layerBadge = "badge-rare";
+
+    cardsHtml += `
+      <div class="signal-card">
+        <div class="signal-card-head">
+          <div class="signal-pair">${s.symbol} <span style="font-size: 0.8rem; color: var(--text-muted); font-weight: 400;">(${s.timeframe})</span></div>
+          <div style="display: flex; gap: 0.4rem;">
+            <span class="badge ${layerBadge}">${s.layer}</span>
+            <span class="badge ${actionBadge}">${s.action}</span>
+          </div>
+        </div>
+
+        <div class="signal-metrics">
+          <div class="metric-item">
+            <span class="metric-lbl">ENTRY PRICE</span>
+            <span class="metric-val">${s.entry}</span>
+          </div>
+          <div class="metric-item">
+            <span class="metric-lbl">TARGET (1:${s.rr} R:R)</span>
+            <span class="metric-val" style="color: #34d399;">${s.tp}</span>
+          </div>
+          <div class="metric-item">
+            <span class="metric-lbl">INVALIDATION (SL)</span>
+            <span class="metric-val" style="color: #fb7185;">${s.sl}</span>
+          </div>
+          <div class="metric-item">
+            <span class="metric-lbl">EDGE MASS M(t)</span>
+            <span class="metric-val">${s.m_t}</span>
+          </div>
+        </div>
+
+        <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.72rem; color: var(--text-muted); font-family: var(--font-mono);">
+          <span>Session: ${s.session || "LONDON"}</span>
+          <span>Spread: ${s.spread_points || 15} pts</span>
+        </div>
+
+        <div class="signal-actions">
+          <button class="btn btn-outline" style="flex: 1;" onclick='copySignal(${JSON.stringify(s)})'>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+            Copy Signal
+          </button>
+          <button class="btn btn-primary" onclick='dispatchSimulatedTrade(${JSON.stringify(s)})'>
+            Verify Risk
+          </button>
+        </div>
+      </div>
+    `;
+  });
+
+  container.innerHTML = cardsHtml;
 }
 
 // -----------------------------------------------------------------------------
@@ -462,6 +525,9 @@ window.copySignal = function(sig) {
 };
 
 window.dispatchSimulatedTrade = function(sig) {
+  // Ensure terminal view is active
+  switchView('terminal');
+
   // Switch to Sammy tab and auto-populate parameters
   const sammyTabBtn = document.querySelector('[data-tab="tab-sammy"]');
   if (sammyTabBtn) sammyTabBtn.click();

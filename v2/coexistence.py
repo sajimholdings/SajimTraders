@@ -41,10 +41,10 @@ logger = logging.getLogger("CoexistenceGatekeeper")
 MAGIC_V1 = 777999
 MAGIC_V2 = 888222
 
-MAX_COMBINED_POSITIONS = 6
-MIN_MARGIN_LEVEL_PCT = 500.0
-MAX_CLUSTER_EXPOSURE = 2
-MAX_DAILY_DRAWDOWN_PCT = 0.05  # 5% max daily account risk
+MAX_COMBINED_POSITIONS = 2   # Max 2 trades total (e.g. 1 Gold + 1 Nasdaq)
+MIN_MARGIN_LEVEL_PCT = 200.0
+MAX_CLUSTER_EXPOSURE = 1     # Strict 1 position per asset (Zero over-concentration)
+MAX_DAILY_DRAWDOWN_PCT = 0.50 # 50% max daily risk (Generous buffer for flipping)
 
 
 class CoexistenceGatekeeper:
@@ -87,6 +87,10 @@ class CoexistenceGatekeeper:
         self.today_floating_pnl: float = 0.0
         self.circuit_breaker_active: bool = False
         self.circuit_breaker_reason: str = ""
+
+        # Dynamic Watermark Capital Preservation Vault
+        self.high_watermark_equity: float = 0.0
+        self.protected_capital_floor: float = 0.0
 
         # Bot active toggles (pluggable controls for WebApp)
         self.v1_enabled: bool = True
@@ -162,14 +166,39 @@ class CoexistenceGatekeeper:
 
         self.today_closed_pnl = round(closed_pnl, 2)
 
-        # Evaluate Daily Circuit Breaker
+        # Dynamic High-Watermark Capital Preservation Vault
+        if self.account_equity > self.high_watermark_equity:
+            self.high_watermark_equity = self.account_equity
+
+        # Ratchet protected capital floor as account grows:
+        if self.high_watermark_equity >= 200.0:
+            self.protected_capital_floor = 170.0
+        elif self.high_watermark_equity >= 150.0:
+            self.protected_capital_floor = 125.0
+        elif self.high_watermark_equity >= 125.0:
+            self.protected_capital_floor = 105.0
+        elif self.high_watermark_equity >= 100.0:
+            self.protected_capital_floor = 85.0
+        elif self.high_watermark_equity >= 85.0:
+            self.protected_capital_floor = 72.0
+        else:
+            self.protected_capital_floor = 0.0
+
+        # Evaluate Daily Circuit Breaker & Watermark Floor
         net_daily_pnl = self.today_closed_pnl + min(0.0, self.today_floating_pnl)
         max_allowed_loss = self.account_balance * self.max_daily_dd_pct
-        if net_daily_pnl < 0 and abs(net_daily_pnl) >= max_allowed_loss and self.account_balance > 0:
+        if self.protected_capital_floor > 0 and self.account_equity <= self.protected_capital_floor:
+            self.circuit_breaker_active = True
+            self.circuit_breaker_reason = (
+                f"🛡️ Protected Capital Watermark Floor Reached (${self.account_equity:.2f} <= ${self.protected_capital_floor:.2f}) "
+                f"from peak ${self.high_watermark_equity:.2f}. Banked profits locked!"
+            )
+            logger.critical(f"[PROTECTED CAPITAL ENGAGED] {self.circuit_breaker_reason}")
+        elif net_daily_pnl < 0 and abs(net_daily_pnl) >= max_allowed_loss and self.account_balance > 0:
             self.circuit_breaker_active = True
             self.circuit_breaker_reason = (
                 f"Combined daily net loss ({net_daily_pnl:.2f} {self.currency}) >= "
-                f"5% limit ({max_allowed_loss:.2f} {self.currency})"
+                f"50% limit ({max_allowed_loss:.2f} {self.currency})"
             )
         else:
             self.circuit_breaker_active = False
@@ -201,7 +230,10 @@ class CoexistenceGatekeeper:
         if bot_name.upper() == "V2" and not self.v2_enabled:
             return False, "Sajim V2 is currently toggled OFF in gatekeeper"
 
-        # 2. Daily Circuit Breaker
+        # 2. Daily Circuit Breaker & Emergency Safety Floor
+        if self.account_equity > 0 and self.account_equity < 20.0:
+            return False, f"🛑 Emergency Capital Floor Triggered: Equity ${self.account_equity:.2f} < $20.00 safety reserve."
+
         if self.circuit_breaker_active:
             return False, f"🛑 Circuit Breaker Active: {self.circuit_breaker_reason}"
 

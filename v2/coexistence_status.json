@@ -1,83 +1,34 @@
 {
-  "timestamp": "2026-09-09T17:36:49.433819",
+  "timestamp": "2026-09-10T13:38:13.736103",
   "account": {
-    "balance": 133.53,
-    "equity": 162.42,
-    "free_margin": 156.5,
-    "margin_level_pct": 2743.58,
+    "balance": 22.6,
+    "equity": 22.6,
+    "free_margin": 22.6,
+    "margin_level_pct": 9999.0,
     "currency": "USD"
   },
   "pnl": {
-    "today_closed": -13.91,
-    "today_floating": 28.89,
-    "combined_daily_net": 14.98
+    "today_closed": -10.52,
+    "today_floating": 0.0,
+    "combined_daily_net": -10.52
   },
   "circuit_breaker": {
-    "active": true,
-    "reason": "Combined daily net loss (-13.91 USD) >= 5% limit (6.68 USD)"
+    "active": false,
+    "reason": ""
   },
   "concurrency": {
-    "total_open": 4,
-    "max_combined": 20,
+    "total_open": 0,
+    "max_combined": 12,
     "v1_count": 0,
-    "v2_count": 4,
+    "v2_count": 0,
     "other_count": 0
   },
   "toggles": {
-    "v1_enabled": true,
+    "v1_enabled": false,
     "v2_enabled": true
   },
   "positions": {
     "v1": [],
-    "v2": [
-      {
-        "ticket": 707119821,
-        "symbol": "GBPJPY",
-        "type": "SELL",
-        "volume": 0.01,
-        "price_open": 207.99,
-        "sl": 208.534,
-        "tp": 206.358,
-        "profit": 1.44,
-        "magic": 888222,
-        "comment": "Sajim_V2_YoungSurge"
-      },
-      {
-        "ticket": 707120237,
-        "symbol": "GBPJPY",
-        "type": "SELL",
-        "volume": 0.01,
-        "price_open": 207.993,
-        "sl": 208.537,
-        "tp": 206.361,
-        "profit": 1.46,
-        "magic": 888222,
-        "comment": "Sajim_V2_YoungSurge"
-      },
-      {
-        "ticket": 707274239,
-        "symbol": "BTCUSD",
-        "type": "BUY",
-        "volume": 0.01,
-        "price_open": 79007.44,
-        "sl": 78443.14,
-        "tp": 80460.35,
-        "profit": 3.27,
-        "magic": 888222,
-        "comment": "Sajim_V2_YoungSurge"
-      },
-      {
-        "ticket": 707446790,
-        "symbol": "XAUUSD",
-        "type": "BUY",
-        "volume": 0.01,
-        "price_open": 4402.05,
-        "sl": 4380.41,
-        "tp": 4465.42,
-        "profit": 22.72,
-        "magic": 888222,
-        "comment": "Sajim_V2_YoungSurge"
-      }
-    ]
+    "v2": []
   }
 }

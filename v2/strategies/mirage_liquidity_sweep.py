@@ -21,6 +21,7 @@ from v2.engine.liquidity_sweep_engine import (
     MirageLiquiditySweepEngine,
     LiquiditySweepSignal,
 )
+from core.beep_processor import BeepSnipeFilter, BeepSnipeEvaluation
 
 
 class MirageLiquiditySweepCartridge(BaseStrategyCartridge):
@@ -57,7 +58,9 @@ class MirageLiquiditySweepCartridge(BaseStrategyCartridge):
         minor_len: int = 8,
         confirm_window: int = 13,
         sl_buffer: float = 0.25,
-        tp_target: str = "TP2",   # Default take profit target ("TP1", "TP2", "TP3")
+        tp_target: str = "TP1",   # Fast 1.0R micro-scalp target for high turnover
+        use_beep_filter: bool = False,
+        min_beep_score: float = 50.0,
     ):
         super().__init__(name=name, enabled=enabled)
         self.engine = MirageLiquiditySweepEngine(
@@ -69,6 +72,7 @@ class MirageLiquiditySweepCartridge(BaseStrategyCartridge):
             confirm_window=confirm_window,
             sl_buffer=sl_buffer,
         )
+        self.snipe_filter = BeepSnipeFilter(min_snipe_score=min_beep_score)
         self.parameters = {
             "swing_len": swing_len,
             "lookback_bars": lookback_bars,
@@ -78,6 +82,8 @@ class MirageLiquiditySweepCartridge(BaseStrategyCartridge):
             "confirm_window": confirm_window,
             "sl_buffer": sl_buffer,
             "tp_target": tp_target,
+            "use_beep_filter": use_beep_filter,
+            "min_beep_score": min_beep_score,
         }
 
     def evaluate(
@@ -128,6 +134,21 @@ class MirageLiquiditySweepCartridge(BaseStrategyCartridge):
         if last_sig.bar_index < n_bars - 2:
             return None
 
+        # BEEP Snipe Confirmation Filter Check (if enabled in cartridge)
+        beep_snipe_meta = {}
+        if self.parameters.get("use_beep_filter", False):
+            eval_res = self.snipe_filter.evaluate(
+                symbol=symbol,
+                timeframe=timeframe,
+                action=last_sig.direction,
+                bars=bars,
+                strategy_name=self.name,
+                market_info=market_info,
+            )
+            if not eval_res.passed:
+                return None
+            beep_snipe_meta = eval_res.to_dict()
+
         # Target TP selection
         tp_mode = self.parameters.get("tp_target", "TP2")
         if tp_mode == "TP1":
@@ -150,6 +171,20 @@ class MirageLiquiditySweepCartridge(BaseStrategyCartridge):
             f"Extreme: {last_sig.wick_extreme:.5f}"
         )
 
+        sig_meta = {
+            "score": last_sig.score,
+            "swept_level": last_sig.swept_level,
+            "wick_extreme": last_sig.wick_extreme,
+            "tp1": last_sig.tp1_price,
+            "tp2": last_sig.tp2_price,
+            "tp3": last_sig.tp3_price,
+            "is_choch": last_sig.is_choch_confirmed,
+            "is_equal": last_sig.is_equal_sweep,
+            "bar_index": last_sig.bar_index,
+        }
+        if beep_snipe_meta:
+            sig_meta["beep_snipe"] = beep_snipe_meta
+
         return StrategySignal(
             symbol=symbol,
             action=last_sig.direction,
@@ -161,15 +196,5 @@ class MirageLiquiditySweepCartridge(BaseStrategyCartridge):
             confidence=conf,
             strategy_name=self.name,
             reason=reason_str,
-            metadata={
-                "score": last_sig.score,
-                "swept_level": last_sig.swept_level,
-                "wick_extreme": last_sig.wick_extreme,
-                "tp1": last_sig.tp1_price,
-                "tp2": last_sig.tp2_price,
-                "tp3": last_sig.tp3_price,
-                "is_choch": last_sig.is_choch_confirmed,
-                "is_equal": last_sig.is_equal_sweep,
-                "bar_index": last_sig.bar_index,
-            },
+            metadata=sig_meta,
         )

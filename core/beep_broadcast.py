@@ -22,6 +22,8 @@ import os
 import sys
 import json
 import logging
+import re
+import html
 from datetime import datetime
 from typing import Dict, Any, List, Optional
 
@@ -30,9 +32,20 @@ ROOT_DIR = os.path.abspath(os.path.join(BASE_DIR, ".."))
 
 logger = logging.getLogger("BeepBroadcast")
 
+# Global Governance: Only Sajim V2 signals dispatch to Telegram channels
+ALLOW_V1_BROADCASTS = False
+
 # Persistence paths
 BROADCAST_LOG = os.path.join(ROOT_DIR, "broadcast_stream.jsonl")
 BROADCAST_ACTIVE_JSON = os.path.join(ROOT_DIR, "broadcast_active.json")
+
+
+def clean_html_text(text: str) -> str:
+    """Sanitizes text for Telegram HTML mode, preventing entity 400 parse failures."""
+    if not text:
+        return ""
+    return str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
 
 
 class BeepBroadcastBus:
@@ -83,6 +96,11 @@ class BeepBroadcastBus:
 
         # 3. Real-Time Non-Blocking Telegram Channel Dispatch
         if "broadcast_text" in event:
+            # Mute legacy V1 signals & trades from Telegram channel
+            if not ALLOW_V1_BROADCASTS and event.get("type") in ("SIGNAL_GENERATED", "TRADE_EXECUTED"):
+                logger.debug(f"[🔇 V1 MUTED] Suppressed V1 Telegram broadcast for {event.get('type')}")
+                return
+
             try:
                 from core.telegram_broadcaster import send_telegram_card
                 # Real executed trades, ratchets, profit proof, and scratches dispatch to 'all' (@sajimtraders)
@@ -223,7 +241,9 @@ class BeepBroadcastBus:
         action_emoji = "🟢 BUY" if action == "BUY" else "🔴 SELL"
         phase_emoji = "🌱" if "EARLY" in phase.upper() else ("🔥" if "LATE" in phase.upper() else "⚖️")
         scalp_tag = "⚡ <b>[SCALPING OPPORTUNITY]</b> ⚡\n" if timeframe == "M1" else ""
-        
+        clean_reason = clean_html_text(reason)
+        clean_strat = clean_html_text(strategy_name)
+
         if strategy_name == "MirageLiquiditySweep":
             score = mat.get("score", 0.0)
             swept_lvl = mat.get("swept_level", 0.0)
@@ -235,7 +255,7 @@ class BeepBroadcastBus:
             card = (
                 f"💧 <b>[SAJIM V2] MIRAGE LIQUIDITY SWEEP: {symbol} ({timeframe})</b>\n"
                 f"{scalp_tag}━━━━━━━━━━━━━━━━━━━━━━\n"
-                f"🎯 <b>Engine:</b> Mirage Liquidity Sweep Pro v1.3.1 (SMC)\n"
+                f"🎯 <b>Engine:</b> Mirage Liquidity Sweep Pro (SMC)\n"
                 f"⚡ <b>Sweep Quality Score:</b> <b>{score:.1f} / 100</b>\n"
                 f"🧭 <b>Action:</b> <b>{action_emoji}</b> @ <code>{entry}</code>\n"
                 f"🛑 <b>Stop Loss:</b> <code>{sl}</code>\n"
@@ -245,28 +265,28 @@ class BeepBroadcastBus:
                 f"• Swept Liquidity Pool: <code>{swept_lvl:.5f}</code>{eq_tag}\n"
                 f"• Sweep Wick Extreme: <code>{extreme:.5f}</code>\n"
                 f"• Structure Shift (CHoCH): <b>{choch_str}</b>\n"
-                f"• Break-Even Protocol: <b>Active Upon TP1 Touch</b>\n"
+                f"• Risk Protocol: <b>Break-Even Shield @ +0.35R</b>\n"
                 f"━━━━━━━━━━━━━━━━━━━━━━\n"
-                f"<i>{reason}</i>"
+                f"💡 <i>{clean_reason}</i>"
             )
         else:
             card = (
                 f"📊 <b>[SAJIM V2] TREND DURATION SIGNAL: {symbol} ({timeframe})</b>\n"
                 f"{scalp_tag}━━━━━━━━━━━━━━━━━━━━━━\n"
                 f"🎯 <b>Engine:</b> Trend Duration Forecast (HMA-50)\n"
-                f"⚡ <b>Strategy:</b> {strategy_name}\n"
+                f"⚡ <b>Strategy:</b> {clean_strat}\n"
                 f"🧭 <b>Action:</b> <b>{action_emoji}</b> @ <code>{entry}</code>\n"
                 f"🛑 <b>Stop Loss:</b> <code>{sl}</code>\n"
                 f"🎯 <b>Take Profit:</b> <code>{tp}</code> (1:{rr:.1f} R:R Target)\n"
                 f"━━━━━━━━━━━━━━━━━━━━━━\n"
                 f"⏳ <b>Trend Duration Telemetry:</b>\n"
-                f"• Current Trend Count: <b>Bar {trend_count}</b>\n"
-                f"• Probable Life Expectancy: <b>{probable_length:.1f} Bars</b>\n"
+                f"• Current Cycle: <b>Bar {trend_count} of {probable_length:.1f} Bars</b>\n"
                 f"• Statistical Maturity: <b>{maturity_ratio*100:.0f}%</b>\n"
                 f"• Lifecycle Phase: {phase_emoji} <b>{phase}</b>\n"
-                f"• HMA-50 Dynamic Baseline: <code>{hma_val:.5f}</code>\n"
+                f"• Dynamic Baseline: <code>{hma_val:.5f}</code>\n"
+                f"• Defense Protocol: <b>BE Shield @ +0.35R | Momentum Decrement Exit</b>\n"
                 f"━━━━━━━━━━━━━━━━━━━━━━\n"
-                f"<i>{reason}</i>"
+                f"💡 <i>{clean_reason}</i>"
             )
         event = {
             "id": f"SIG_V2_{int(datetime.now().timestamp()*1000)}",
@@ -313,6 +333,7 @@ class BeepBroadcastBus:
         prob_len = mat.get("probable_length", 20.0)
         phase = mat.get("phase", "UNKNOWN")
         mat_pct = int(mat.get("maturity_ratio", 0.0) * 100)
+        clean_strat = clean_html_text(strategy_name)
 
         scalp_tag = "⚡ <b>[SCALPING OPPORTUNITY]</b> ⚡\n" if timeframe == "M1" else ""
 
@@ -322,31 +343,31 @@ class BeepBroadcastBus:
             is_choch = mat.get("is_choch", True)
             choch_str = "CHoCH Confirmed" if is_choch else "Raw Sweep"
             card = (
-                f"🚀 <b>[SAJIM V2 LIVE EXECUTION] #{ticket} {symbol}</b>\n"
+                f"🚀 <b>[SAJIM V2 LIVE ORDER] #{ticket} {symbol}</b>\n"
                 f"{scalp_tag}━━━━━━━━━━━━━━━━━━━━━━\n"
-                f"🎯 <b>Engine:</b> Mirage Liquidity Sweep Pro v1.3.1 (Magic 888222)\n"
-                f"⚡ <b>Execution Mode:</b> {choch_str} (Score: {score:.1f}/100)\n"
+                f"🎯 <b>Engine:</b> Mirage Liquidity Sweep Pro (Magic 888222)\n"
+                f"⚡ <b>Mode:</b> {choch_str} (Score: {score:.1f}/100)\n"
                 f"🧭 <b>Direction:</b> <b>{action}</b> {lot} Lots @ <code>{entry}</code>\n"
                 f"🛑 <b>Stop Loss:</b> <code>{sl}</code>\n"
                 f"🎯 <b>Take Profit:</b> <code>{tp}</code>\n"
                 f"💧 <b>Swept Pool:</b> <code>{swept_lvl:.5f}</code>\n"
-                f"🛡️ <b>Management:</b> Break-Even after TP1 (1R secured)\n"
+                f"🛡️ <b>Shield:</b> Move SL to Breakeven @ +0.35R\n"
                 f"━━━━━━━━━━━━━━━━━━━━━━\n"
-                f"<i>Execution confirmed live via Sajim Quant Labs V2 Engine.</i>"
+                f"<i>Execution confirmed live on broker via Sajim Quant Labs V2.</i>"
             )
         else:
             card = (
-                f"🚀 <b>[SAJIM V2 LIVE EXECUTION] #{ticket} {symbol}</b>\n"
+                f"🚀 <b>[SAJIM V2 LIVE ORDER] #{ticket} {symbol}</b>\n"
                 f"{scalp_tag}━━━━━━━━━━━━━━━━━━━━━━\n"
-                f"🎯 <b>Engine:</b> Sajim V2 Trend Duration Maturity (Magic 888222)\n"
-                f"⚡ <b>Strategy Cartridge:</b> {strategy_name}\n"
+                f"🎯 <b>Engine:</b> Sajim V2 Trend Duration (Magic 888222)\n"
+                f"⚡ <b>Strategy:</b> {clean_strat}\n"
                 f"🧭 <b>Direction:</b> <b>{action}</b> {lot} Lots @ <code>{entry}</code>\n"
                 f"🛑 <b>Stop Loss:</b> <code>{sl}</code>\n"
                 f"🎯 <b>Take Profit:</b> <code>{tp}</code>\n"
-                f"⏳ <b>Duration Maturity:</b> Bar {trend_count} / {prob_len:.0f} ({mat_pct}% - {phase})\n"
-                f"🛡️ <b>Management Protocol:</b> Two-Stage Ratchet (+1.5R BE+0.15R | +2.2R Lock +1.0R)\n"
+                f"⏳ <b>Maturity:</b> Bar {trend_count} of {prob_len:.0f} ({mat_pct}% - {phase})\n"
+                f"🛡️ <b>Protocol:</b> BE Shield @ +0.35R | Kinetic Harvest @ ≥+0.65R\n"
                 f"━━━━━━━━━━━━━━━━━━━━━━\n"
-                f"<i>Execution confirmed live via Sajim Quant Labs V2 Engine.</i>"
+                f"<i>Execution confirmed live on broker via Sajim Quant Labs V2.</i>"
             )
         event = {
             "id": f"EXEC_V2_{ticket}",
@@ -458,13 +479,16 @@ class BeepBroadcastBus:
         profit: float,
         r_multiple: float,
         reason: str = "Momentum Exhaustion Peak",
+        pct_closed: float = 100.0,
     ):
+        close_desc = "100% Closed at Peak" if pct_closed >= 99.0 else f"{pct_closed:.0f}% Harvested at Peak (Runner Protected)"
+        clean_reason = clean_html_text(reason)
         card = (
             f"🦅 <b>Sajim Hummingbird Harvest: {symbol}</b>\n"
             f"━━━━━━━━━━━━━━━━━━━━━━\n"
             f"• Peak Profit Banked: <code>+${profit:.2f} USD</code> (+{r_multiple:.2f}R)\n"
-            f"• Position: <code>#{ticket}</code> (100% Closed at Peak)\n"
-            f"• Reason: {reason}\n"
+            f"• Position: <code>#{ticket}</code> ({close_desc})\n"
+            f"• Reason: {clean_reason}\n"
             f"• Strategy: Capital secured in balance. Standing by for discounted baseline re-entry.\n"
             f"━━━━━━━━━━━━━━━━━━━━━━\n"
             f"<i>Sajim Institutional Alpha Engine</i>"
@@ -477,11 +501,12 @@ class BeepBroadcastBus:
             "symbol": symbol,
             "profit": profit,
             "r_multiple": r_multiple,
+            "pct_closed": pct_closed,
             "reason": reason,
             "broadcast_text": card,
         }
         self._save_event(event)
-        logger.info(f"[🦅 BROADCAST] Hummingbird harvest published for #{ticket} ({symbol} +${profit:.2f} | +{r_multiple:.2f}R)")
+        logger.info(f"[🦅 BROADCAST] Hummingbird harvest published for #{ticket} ({symbol} +${profit:.2f} | +{r_multiple:.2f}R | {close_desc})")
         return event
 
     # =========================================================================

@@ -75,6 +75,18 @@ class UniversalLotCalculator:
         # Exact raw lot calculation
         raw_lot = risk_cash / max(1e-6, (stop_dist * point_value))
 
+        # Strict Small-Account Risk Guardian:
+        # Prevent micro-stops from ballooning lot sizes beyond safe capital limits
+        if equity < 50.0:
+            equity_lot_ceiling = 0.02 if ("JPY" in symbol or "USD" in symbol) else 0.01
+            vol_max = min(vol_max, equity_lot_ceiling)
+        elif equity < 100.0:
+            equity_lot_ceiling = 0.05 if ("JPY" in symbol or "USD" in symbol) else 0.02
+            vol_max = min(vol_max, equity_lot_ceiling)
+        elif equity < 250.0:
+            equity_lot_ceiling = 0.10 if ("JPY" in symbol or "USD" in symbol) else 0.05
+            vol_max = min(vol_max, equity_lot_ceiling)
+
         # Snap to broker lot step and clamp
         steps = round((raw_lot - vol_min) / vol_step)
         clean_lot = vol_min + (steps * vol_step)

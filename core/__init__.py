@@ -27,6 +27,7 @@ from .beep_broadcast import BeepBroadcastBus
 from .lot_calculator import UniversalLotCalculator
 from .app import SajimBeepClient, display_sammy_card
 from .api import BeepApiHandler
+from .beep_processor import BeepProcessor, BeepSnipeFilter, BeepSnipeEvaluation
 
 __all__ = [
     "BeepCoreEngine",
@@ -41,4 +42,7 @@ __all__ = [
     "SajimBeepClient",
     "display_sammy_card",
     "BeepApiHandler",
+    "BeepProcessor",
+    "BeepSnipeFilter",
+    "BeepSnipeEvaluation",
 ]

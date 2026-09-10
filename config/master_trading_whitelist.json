@@ -7,24 +7,20 @@
   },
   "live_trading_whitelist": [
     "XAUUSD",
-    "XAGUSD",
-    "XAUAUD",
+    "NASDAQ-100",
+    "DJ30",
+    "USDJPY",
     "GBPJPY",
-    "EURJPY",
-    "BTCUSD",
-    "ETHUSD",
-    "SOLUSD",
-    "USDCAD",
-    "USDCHF",
-    "EURAUD"
+    "BTCUSD"
   ],
   "paper_testing_watchlist": [
+    "EURJPY",
     "EURUSD",
-    "USDJPY",
     "CADJPY",
     "AUDUSD",
     "AUDJPY",
-    "EURGBP"
+    "EURGBP",
+    "XAGUSD"
   ],
   "toxic_blacklist": [
     "XAUGBP",
@@ -46,48 +42,49 @@
   ],
   "strategies": {
     "V1_BEEP": {
-      "XAUUSD": ["M1", "M15", "M30"],
-      "GBPJPY": ["H1"],
-      "EURJPY": ["M1", "H1"]
+      "XAUUSD": ["M1", "M5", "M15"],
+      "NASDAQ-100": ["M1", "M5"],
+      "DJ30": ["M1", "M5"],
+      "USDJPY": ["M1", "M5"],
+      "EURJPY": ["M1", "M5"],
+      "GBPJPY": ["M5", "M15"],
+      "BTCUSD": ["M5", "M15"]
     },
     "MirageLiquiditySweep": {
-      "XAUUSD": ["M1", "M5", "M15", "H1"],
-      "EURJPY": ["M1", "M5", "M15", "H1"],
-      "XAGUSD": ["M15", "H1"],
-      "XAUAUD": ["H1"],
-      "GBPJPY": ["H1"],
-      "BTCUSD": ["H1"],
-      "ETHUSD": ["M15", "H1"],
-      "SOLUSD": ["H1"]
+      "XAUUSD": ["M1", "M5", "M15"],
+      "NASDAQ-100": ["M1", "M5", "M15"],
+      "DJ30": ["M1", "M5", "M15"],
+      "USDJPY": ["M1", "M5", "M15"],
+      "EURJPY": ["M1", "M5", "M15"],
+      "GBPJPY": ["M5", "M15"],
+      "BTCUSD": ["M5", "M15"]
     },
     "YoungSurgeContinuation": {
-      "XAUUSD": ["M1", "M15", "H1"],
-      "EURJPY": ["M1", "H1"],
-      "GBPJPY": ["H1"],
-      "BTCUSD": ["H1"],
-      "ETHUSD": ["H1"],
-      "USDCAD": ["H1"],
-      "USDCHF": ["H1"]
+      "XAUUSD": ["M1", "M5", "M15"],
+      "NASDAQ-100": ["M1", "M5", "M15"],
+      "DJ30": ["M1", "M5", "M15"],
+      "USDJPY": ["M1", "M5", "M15"],
+      "EURJPY": ["M1", "M5", "M15"],
+      "GBPJPY": ["M5", "M15"],
+      "BTCUSD": ["M5", "M15"]
     },
     "ExhaustionMeanReversion": {
-      "XAUUSD": ["M1", "H1"],
-      "EURJPY": ["M1", "H1"],
-      "GBPJPY": ["H1"],
-      "EURAUD": ["H1"],
-      "USDCAD": ["H1"]
+      "XAUUSD": ["M1", "M5"],
+      "NASDAQ-100": ["M1", "M5"],
+      "DJ30": ["M1", "M5"],
+      "USDJPY": ["M1", "M5"],
+      "EURJPY": ["M1", "M5"],
+      "GBPJPY": ["M5"],
+      "BTCUSD": ["M5"]
     },
     "GrandConfluence": {
-      "XAUUSD": ["M1", "M5", "M15", "H1"],
-      "EURJPY": ["M1", "M5", "M15", "H1"],
-      "XAGUSD": ["M15", "H1"],
-      "XAUAUD": ["H1"],
-      "BTCUSD": ["H1"],
-      "ETHUSD": ["M15", "H1"],
-      "SOLUSD": ["H1"],
-      "GBPJPY": ["H1"],
-      "USDCAD": ["H1"],
-      "USDCHF": ["H1"],
-      "EURAUD": ["H1"]
+      "XAUUSD": ["M1", "M5", "M15"],
+      "NASDAQ-100": ["M1", "M5", "M15"],
+      "DJ30": ["M1", "M5", "M15"],
+      "USDJPY": ["M1", "M5", "M15"],
+      "EURJPY": ["M1", "M5", "M15"],
+      "GBPJPY": ["M5", "M15"],
+      "BTCUSD": ["M5", "M15"]
     }
   }
 }

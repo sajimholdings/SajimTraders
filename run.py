@@ -301,8 +301,8 @@ def main():
     p_dual.add_argument("--max-combined", type=int, default=12, help="Max combined open positions across V1 and V2 (default: 12)")
     p_dual.add_argument("--max-v1", type=int, default=6, help="Max concurrent open positions for V1 (default: 6)")
     p_dual.add_argument("--max-v2", type=int, default=6, help="Max concurrent open positions for V2 (default: 6)")
-    p_dual.add_argument("--risk-v1", type=float, default=0.012, help="Base risk fraction for V1 per trade (default: 0.012 = 1.2%%)")
-    p_dual.add_argument("--risk-v2", type=float, default=0.012, help="Base risk fraction for V2 per trade (default: 0.012 = 1.2%%)")
+    p_dual.add_argument("--risk-v1", type=float, default=0.05, help="Base risk fraction for V1 per trade (default: 0.05 = 5.0%%)")
+    p_dual.add_argument("--risk-v2", type=float, default=0.05, help="Base risk fraction for V2 per trade (default: 0.05 = 5.0%%)")
     p_dual.add_argument("--account", type=int, default=None, help="Target MT5 account login (default: Active Terminal Account)")
 
     # 0C. Edge Matrix Backtest

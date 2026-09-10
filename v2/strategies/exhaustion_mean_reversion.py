@@ -17,6 +17,7 @@ import numpy as np
 from typing import Dict, Any, List, Optional
 from v2.strategy_base import BaseStrategyCartridge, StrategySignal
 from v2.trend_duration_engine import TrendDurationEngine
+from core.beep_processor import BeepSnipeFilter, BeepSnipeEvaluation
 
 
 class ExhaustionMeanReversion(BaseStrategyCartridge):
@@ -43,15 +44,20 @@ class ExhaustionMeanReversion(BaseStrategyCartridge):
         min_stretch_atr_mult: float = 1.20,
         sl_atr_mult: float = 1.50,
         min_rr_ratio: float = 1.50,
+        use_beep_filter: bool = False,
+        min_beep_score: float = 50.0,
     ):
         super().__init__(name=name, enabled=enabled)
         self.engine = TrendDurationEngine(length=50, trend_length=3, max_samples=10)
+        self.snipe_filter = BeepSnipeFilter(min_snipe_score=min_beep_score)
         self.parameters = {
             "min_maturity_ratio": min_maturity_ratio,
             "min_stretch_atr_mult": min_stretch_atr_mult,
             "sl_atr_mult": sl_atr_mult,
             "min_rr_ratio": min_rr_ratio,
             "atr_period": 14,
+            "use_beep_filter": use_beep_filter,
+            "min_beep_score": min_beep_score,
         }
 
     @staticmethod
@@ -113,6 +119,19 @@ class ExhaustionMeanReversion(BaseStrategyCartridge):
 
         # 2. Bullish Trend Exhaustion -> FADE SHORT (SELL Snapback to HMA)
         if trend == "UP" and close_p > hma_val:
+            if self.parameters.get("use_beep_filter", False):
+                eval_res = self.snipe_filter.evaluate(
+                    symbol=symbol,
+                    timeframe=timeframe,
+                    action="SELL",
+                    bars=bars,
+                    strategy_name=self.name,
+                    market_info=market_info,
+                )
+                if not eval_res.passed:
+                    return None
+                mat["beep_snipe"] = eval_res.to_dict()
+
             entry_p = close_p
             sl_p = entry_p + (self.parameters["sl_atr_mult"] * atr)
             tp_p = hma_val  # Target is snapback to baseline equilibrium
@@ -143,6 +162,19 @@ class ExhaustionMeanReversion(BaseStrategyCartridge):
 
         # 3. Bearish Trend Exhaustion -> FADE LONG (BUY Snapback to HMA)
         elif trend == "DOWN" and close_p < hma_val:
+            if self.parameters.get("use_beep_filter", False):
+                eval_res = self.snipe_filter.evaluate(
+                    symbol=symbol,
+                    timeframe=timeframe,
+                    action="BUY",
+                    bars=bars,
+                    strategy_name=self.name,
+                    market_info=market_info,
+                )
+                if not eval_res.passed:
+                    return None
+                mat["beep_snipe"] = eval_res.to_dict()
+
             entry_p = close_p
             sl_p = entry_p - (self.parameters["sl_atr_mult"] * atr)
             tp_p = hma_val  # Target is snapback to baseline equilibrium

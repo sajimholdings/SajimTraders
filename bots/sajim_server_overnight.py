@@ -210,7 +210,7 @@ class SajimOvernightServer:
             except Exception:
                 pass
 
-            if sig.layer in ("DIAMOND", "RARE") and sig.signal_id not in self.broadcasted_signal_ids:
+            if self.bot.max_positions > 0 and sig.layer in ("DIAMOND", "RARE") and sig.signal_id not in self.broadcasted_signal_ids:
                 self.broadcasted_signal_ids.add(sig.signal_id)
                 try:
                     narrative_why = f"Institutional thrust {sig.layer} {sig.action} in {sig.mode} mode."

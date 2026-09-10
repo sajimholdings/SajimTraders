@@ -16,6 +16,7 @@ import numpy as np
 from typing import Dict, Any, List, Optional
 from v2.strategy_base import BaseStrategyCartridge, StrategySignal
 from v2.trend_duration_engine import TrendDurationEngine
+from core.beep_processor import BeepSnipeFilter, BeepSnipeEvaluation
 
 
 class YoungSurgeContinuation(BaseStrategyCartridge):
@@ -40,17 +41,22 @@ class YoungSurgeContinuation(BaseStrategyCartridge):
         self,
         name: str = "YoungSurgeContinuation",
         enabled: bool = True,
-        max_maturity_ratio: float = 0.60,
-        sl_atr_mult: float = 1.5,
-        tp_rr_ratio: float = 3.0,
+        max_maturity_ratio: float = 0.70,
+        sl_atr_mult: float = 0.8,
+        tp_rr_ratio: float = 1.2,
+        use_beep_filter: bool = False,
+        min_beep_score: float = 48.0,
     ):
         super().__init__(name=name, enabled=enabled)
         self.engine = TrendDurationEngine(length=50, trend_length=3, max_samples=10)
+        self.snipe_filter = BeepSnipeFilter(min_snipe_score=min_beep_score)
         self.parameters = {
             "max_maturity_ratio": max_maturity_ratio,
             "sl_atr_mult": sl_atr_mult,
             "tp_rr_ratio": tp_rr_ratio,
             "atr_period": 14,
+            "use_beep_filter": use_beep_filter,
+            "min_beep_score": min_beep_score,
         }
 
     @staticmethod
@@ -105,11 +111,30 @@ class YoungSurgeContinuation(BaseStrategyCartridge):
         if atr <= 0:
             atr = point * 100.0
 
-        sl_dist = self.parameters["sl_atr_mult"] * atr
+        # High-Velocity Tight Invalidation with Spread Buffer Protection:
+        spread_pts = market_info.get("spread", 20)
+        spread_price = spread_pts * point
+        min_sl_floor = max(spread_price * 3.0, point * 35.0)
+
+        tf_mult = 0.45 if timeframe == "M1" else (0.55 if timeframe == "M5" else self.parameters["sl_atr_mult"])
+        sl_dist = max(min_sl_floor, tf_mult * atr)
         tp_dist = sl_dist * self.parameters["tp_rr_ratio"]
 
         # 2. Bullish Young Surge Confirmation
         if trend == "UP" and close_p > hma_val and close_p >= open_p:
+            if self.parameters.get("use_beep_filter", False):
+                eval_res = self.snipe_filter.evaluate(
+                    symbol=symbol,
+                    timeframe=timeframe,
+                    action="BUY",
+                    bars=bars,
+                    strategy_name=self.name,
+                    market_info=market_info,
+                )
+                if not eval_res.passed:
+                    return None
+                mat["beep_snipe"] = eval_res.to_dict()
+
             entry_p = close_p
             sl_p = entry_p - sl_dist
             tp_p = entry_p + tp_dist
@@ -133,6 +158,19 @@ class YoungSurgeContinuation(BaseStrategyCartridge):
 
         # 3. Bearish Young Surge Confirmation
         elif trend == "DOWN" and close_p < hma_val and close_p <= open_p:
+            if self.parameters.get("use_beep_filter", False):
+                eval_res = self.snipe_filter.evaluate(
+                    symbol=symbol,
+                    timeframe=timeframe,
+                    action="SELL",
+                    bars=bars,
+                    strategy_name=self.name,
+                    market_info=market_info,
+                )
+                if not eval_res.passed:
+                    return None
+                mat["beep_snipe"] = eval_res.to_dict()
+
             entry_p = close_p
             sl_p = entry_p + sl_dist
             tp_p = entry_p - tp_dist

@@ -118,10 +118,16 @@ def test_web_server():
             assert res.status == 200
             sammy_res2 = json.loads(res.read().decode('utf-8'))
             assert sammy_res2["decision"] == "STOP"
-            print(f"    [+] Sammy Gatekeeper Block: Decision = {sammy_res2['decision']} (Correctly blocked!)")
+        print("[*] 10. Testing GET /api/landing...")
+        with urllib.request.urlopen(f"{base_url}/api/landing") as res:
+            assert res.status == 200
+            landing_data = json.loads(res.read().decode('utf-8'))
+            assert "brand" in landing_data
+            assert "stats" in landing_data
+            print(f"    [+] Landing API: Brand = {landing_data['brand']} | Rare WR = {landing_data['stats']['rare_layer_winrate']}")
 
         print("\n===========================================================")
-        print("   ALL 9 END-TO-END SAJIM TRADERS WEB APP TESTS PASSED!")
+        print("   ALL 10 END-TO-END SAJIM TRADERS WEB APP TESTS PASSED!")
         print("===========================================================\n")
 
     finally:

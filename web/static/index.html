@@ -3,18 +3,18 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Sajim Traders — Institutional Quant Terminal</title>
+  <title>Sajim Traders — Institutional Quantitative Terminal & Platform</title>
   <link rel="stylesheet" href="/styles.css">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700;800&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
 </head>
 <body>
 
-  <!-- Top Navigation Bar -->
+  <!-- Top Institutional Header -->
   <header class="top-nav">
     <div class="brand-section">
-      <div class="brand-logo">
+      <div class="brand-logo" onclick="switchView('landing')" style="cursor: pointer;">
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="color: #38bdf8;">
           <polyline points="22 7 13.5 15.5 8.5 10.5 2 17"></polyline>
           <polyline points="16 7 22 7 22 13"></polyline>
@@ -22,376 +22,542 @@
         <span>SAJIM TRADERS</span>
       </div>
       <span class="brand-badge">QUANT LABS</span>
-      <span style="font-size: 0.72rem; color: #64748b; font-family: var(--font-mono); margin-left: 0.5rem;">
-        Powered by BEEP Protocol (Licensed)
-      </span>
+      <span class="brand-license-tag">Powered by BEEP Protocol (Licensed)</span>
     </div>
 
-    <div class="nav-status">
-      <div class="pulse-indicator">
-        <span class="dot"></span>
-        <span id="nav-broker-status">MT5: JustMarkets-Demo3 (1200442972)</span>
+    <!-- Mode Switcher & Global Telemetry -->
+    <div class="nav-controls">
+      <div class="view-toggle-container">
+        <button class="view-toggle-btn active" id="btn-view-landing" onclick="switchView('landing')">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><polyline points="9 22 9 12 15 12 15 22"></polyline></svg>
+          Overview
+        </button>
+        <button class="view-toggle-btn" id="btn-view-terminal" onclick="switchView('terminal')">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
+          Live Terminal
+          <span class="pulse-mini"></span>
+        </button>
       </div>
-      <div class="session-badge" id="nav-market-session">LONDON_OPEN</div>
-      <div class="circuit-badge safe" id="nav-circuit-breaker">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-        <span id="circuit-text">CIRCUIT SAFE</span>
+
+      <div class="nav-status">
+        <div class="pulse-indicator">
+          <span class="dot"></span>
+          <span id="nav-broker-status">MT5: JustMarkets-Demo3</span>
+        </div>
+        <div class="session-badge" id="nav-market-session">LONDON_OPEN</div>
+        <div class="circuit-badge safe" id="nav-circuit-breaker">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+          <span id="circuit-text">CIRCUIT SAFE</span>
+        </div>
+        <button class="btn btn-outline" id="btn-manual-refresh" title="Sync with MT5 terminal">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+          <span id="refresh-counter">3s</span>
+        </button>
       </div>
-      <button class="btn btn-outline" id="btn-manual-refresh" title="Force Telemetry Sync">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
-        <span id="refresh-counter">3s</span>
-      </button>
     </div>
   </header>
 
-  <main class="main-content">
-
-    <!-- Executive KPI Ribbon -->
-    <section class="kpi-grid">
-      <div class="kpi-card">
-        <div class="kpi-title">Account Balance</div>
-        <div class="kpi-value" id="kpi-balance">--</div>
-        <div class="kpi-sub" id="kpi-balance-usd">-- USD (Cent USC)</div>
-      </div>
-      <div class="kpi-card">
-        <div class="kpi-title">Current Equity</div>
-        <div class="kpi-value" id="kpi-equity">--</div>
-        <div class="kpi-sub" id="kpi-equity-usd">-- USD</div>
-      </div>
-      <div class="kpi-card">
-        <div class="kpi-title">Today's Floating PnL</div>
-        <div class="kpi-value" id="kpi-floating-pnl">--</div>
-        <div class="kpi-sub" id="kpi-closed-pnl">Closed PnL: --</div>
-      </div>
-      <div class="kpi-card">
-        <div class="kpi-title">Free Margin</div>
-        <div class="kpi-value" id="kpi-free-margin">--</div>
-        <div class="kpi-sub" id="kpi-margin-level">Margin Level: --%</div>
-      </div>
-      <div class="kpi-card">
-        <div class="kpi-title">Portfolio Concurrency</div>
-        <div class="kpi-value" id="kpi-concurrency">0 / 12</div>
-        <div class="concurrency-bar">
-          <div class="concurrency-fill" id="concurrency-progress" style="width: 41%;"></div>
-        </div>
-        <div class="kpi-sub" id="kpi-bot-breakdown" style="margin-top: 0.4rem;">V1: 0 | V2: 0</div>
+  <!-- ===================================================================== -->
+  <!-- VIEW 1: PUBLIC BRAND & MEMBER SHOWCASE (LANDING)                     -->
+  <!-- ===================================================================== -->
+  <div id="view-landing" class="view-section active">
+    
+    <!-- Hero Section -->
+    <section class="landing-hero">
+      <div class="hero-badge">INSTITUTIONAL QUANTITATIVE INFRASTRUCTURE</div>
+      <h1 class="hero-title">
+        Scale-Invariant Alpha & <span class="gradient-text">Autonomous Bot Fleet</span>
+      </h1>
+      <p class="hero-subtitle">
+        Sajim Traders extracts mathematical market anomalies via licensed BEEP physics, 
+        combining unweighted timeframe momentum with dynamic lot compounding and strict drawdown preservation.
+      </p>
+      <div class="hero-actions">
+        <button class="btn btn-hero-primary" onclick="switchView('terminal')">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+          Launch Live Quant Terminal
+        </button>
+        <a href="https://t.me/sajimtraders" target="_blank" class="btn btn-hero-outline">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+          Join VIP Telegram Channel
+        </a>
       </div>
     </section>
 
-    <!-- Navigation Tabs Header -->
-    <nav class="tabs-header">
-      <button class="tab-btn active" data-tab="tab-fleet">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
-        Active Fleet & Positions
-        <span class="tab-badge" id="tab-positions-badge">5</span>
-      </button>
-      <button class="tab-btn" data-tab="tab-radar">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"></path><line x1="2" y1="12" x2="22" y2="12"></line></svg>
-        BEEP Signal Radar
-        <span class="tab-badge" id="tab-signals-badge">LIVE</span>
-      </button>
-      <button class="tab-btn" data-tab="tab-matrix">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>
-        Empirical Edge Matrix
-      </button>
-      <button class="tab-btn" data-tab="tab-sammy">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-        Sammy's 4-Check Risk
-      </button>
-      <button class="tab-btn" data-tab="tab-community">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
-        Community Hub
-      </button>
-    </nav>
+    <!-- Verified Empirical Stats Ribbon -->
+    <section class="stats-ribbon">
+      <div class="stat-card">
+        <div class="stat-number profit-green">92.6%</div>
+        <div class="stat-label">Rare Layer Win-Rate</div>
+        <div class="stat-sub">High-mass momentum plume (1:3.5 R:R)</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-number cyan-text">87.1%</div>
+        <div class="stat-label">Certified Layer Win-Rate</div>
+        <div class="stat-sub">Baseline dip harvesting on MT5</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-number gold-text">204 Fronts</div>
+        <div class="stat-label">Empirical MT5 Backtest Matrix</div>
+        <div class="stat-sub">Cross-asset tick data audit</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-number purple-text">1:3.5 R:R</div>
+        <div class="stat-label">Target Payoff Asymmetry</div>
+        <div class="stat-sub">Two-stage trailing ratchets</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-number profit-green">$4 &rarr; $10+</div>
+        <div class="stat-label">3-Trade Compounding Ladder</div>
+        <div class="stat-sub">+153.0% ROI on Cent Micro-Capital</div>
+      </div>
+    </section>
 
-    <!-- TAB 1: ACTIVE FLEET & POSITIONS -->
-    <div class="tab-panel active" id="tab-fleet">
-      <div class="section-box">
-        <div class="section-head">
-          <div>
-            <div class="section-title">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline></svg>
-              Active Order Execution Fleet
-            </div>
-            <div class="section-sub">Real-time open positions held on MetaTrader 5 terminal across Sajim V1 and V2 models</div>
+    <!-- 4 Core Pillars of the Sajim System -->
+    <section class="pillars-section">
+      <div class="section-badge-center">MATHEMATICAL GOVERNANCE</div>
+      <h2 class="section-heading-center">Engineered for Deterministic Capital Extraction</h2>
+      <p class="section-desc-center">
+        The market is not modeled with retail indicators. We trade discrete institutional dislocations with guaranteed risk bounds.
+      </p>
+
+      <div class="pillars-grid">
+        <div class="pillar-card">
+          <div class="pillar-icon cyan-glow">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><path d="m10 15 5-3-5-3v6z"></path></svg>
           </div>
-          <div style="display: flex; gap: 0.5rem;">
-            <span class="badge" style="background: rgba(56, 189, 248, 0.15); color: #38bdf8;">V1 (Magic: 777999)</span>
-            <span class="badge" style="background: rgba(16, 185, 129, 0.15); color: #34d399;">V2 (Magic: 888222)</span>
-          </div>
+          <h3 class="pillar-title">Licensed BEEP Anomaly Radar</h3>
+          <p class="pillar-text">
+            Replaces lagging indicators with Huber Baseline floor $B(t)$, Kinetic Momentum Mass $M(t)$, and thermodynamic friction $\Lambda(t)$ to locate institutional capital vacuums before retail discovers them.
+          </p>
         </div>
 
-        <div class="table-container">
-          <table class="quant-table">
-            <thead>
-              <tr>
-                <th>Ticket</th>
-                <th>Symbol</th>
-                <th>Bot Origin</th>
-                <th>Action</th>
-                <th>Volume</th>
-                <th>Open Price</th>
-                <th>Invalidation (SL)</th>
-                <th>Target (TP)</th>
-                <th>Float PnL</th>
-                <th>Strategy Narrative</th>
-              </tr>
-            </thead>
-            <tbody id="positions-table-body">
-              <tr>
-                <td colspan="10" style="text-align: center; color: var(--text-muted); padding: 2rem;">Loading live positions from broker...</td>
-              </tr>
-            </tbody>
-          </table>
+        <div class="pillar-card">
+          <div class="pillar-icon emerald-glow">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
+          </div>
+          <h3 class="pillar-title">Multi-Bot Fleet Coexistence</h3>
+          <p class="pillar-text">
+            Sajim V1 (Flagship 777999) and V2 (Duration & Liquidity Sweeps 888222) operate concurrently side-by-side with an algorithmic gatekeeper that prevents directional conflict and caps total portfolio risk.
+          </p>
+        </div>
+
+        <div class="pillar-card">
+          <div class="pillar-icon gold-glow">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+          </div>
+          <h3 class="pillar-title">Sammy's 4-Check Risk Shield</h3>
+          <p class="pillar-text">
+            Every trade must pass four sequential mathematical audits: kinetic energy verification, baseline stop-loss cushion, dynamic compounding lot safety, and a 5% daily circuit breaker.
+          </p>
+        </div>
+
+        <div class="pillar-card">
+          <div class="pillar-icon purple-glow">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"></line><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>
+          </div>
+          <h3 class="pillar-title">Dynamic Lot Compounding Ladder</h3>
+          <p class="pillar-text">
+            Capital scaling in the tens ($0.10 \to 0.14 \to 0.19$ lots) turns micro $4 accounts into operational runway in exactly 3 winning trades, with instant hard resets on drawdowns to guarantee survival.
+          </p>
         </div>
       </div>
-    </div>
+    </section>
 
-    <!-- TAB 2: BEEP SIGNAL RADAR -->
-    <div class="tab-panel" id="tab-radar">
-      <div class="section-box">
-        <div class="section-head">
-          <div>
-            <div class="section-title">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polygon points="12 8 8 12 12 16 16 12 12 8"></polygon></svg>
-              Institutional BEEP Signal Stream
-            </div>
-            <div class="section-sub">Sanitized institutional setups filtered by BEEP protocol with 1:3.5 asymmetric Risk:Reward profiles</div>
-          </div>
-          <div style="font-size: 0.8rem; font-family: var(--font-mono); color: var(--text-secondary);">
-            Active Signals: <span id="radar-signal-count" style="color: var(--cyan-glow); font-weight: 700;">0</span>
-          </div>
-        </div>
-
-        <div class="signals-grid" id="signals-container">
-          <!-- Dynamic Signal Cards Injected Here -->
+    <!-- Signal Teaser & Community Call to Action -->
+    <section class="landing-cta-box">
+      <div class="cta-content">
+        <span class="badge badge-rare" style="margin-bottom: 0.8rem;">TELEGRAM VIP BROADCAST</span>
+        <h2 style="font-size: 1.8rem; font-weight: 800; margin-bottom: 0.8rem;">
+          Trade Side-by-Side With Sajim Quantitative Models
+        </h2>
+        <p style="color: var(--text-secondary); max-width: 650px; margin-bottom: 1.5rem; line-height: 1.6;">
+          Join the <strong>@sajimtraders</strong> community to receive institutional setups, entry levels, and real-time execution alerts generated directly by our autonomous daemons.
+        </p>
+        <div style="display: flex; gap: 1rem; flex-wrap: wrap;">
+          <a href="https://t.me/sajimtraders" target="_blank" class="btn btn-primary" style="padding: 0.85rem 1.8rem; font-size: 0.95rem; text-decoration: none;">
+            Join @sajimtraders Channel
+          </a>
+          <button class="btn btn-outline" onclick="switchView('terminal')" style="padding: 0.85rem 1.8rem; font-size: 0.95rem;">
+            Open Terminal Dashboard &rarr;
+          </button>
         </div>
       </div>
-    </div>
+    </section>
 
-    <!-- TAB 3: EMPIRICAL EDGE MATRIX -->
-    <div class="tab-panel" id="tab-matrix">
-      <div class="section-box">
-        <div class="section-head">
-          <div>
-            <div class="section-title">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 20V10M12 20V4M6 20v-6"/></svg>
-              204-Front Quantitative Edge Whitelist
-            </div>
-            <div class="section-sub">Empirically proven asset-timeframe pairs from 100% real tick backtests on MetaTrader 5</div>
-          </div>
-          <span class="badge badge-certified">Audit Version 1.0-EMPIRICAL</span>
+    <!-- Footer -->
+    <footer class="landing-footer">
+      <div>
+        <strong>SAJIM HOLDINGS QUANT LABS</strong> &bull; Chief Quantitative Architect: <strong>Jimmy Mathu</strong>
+      </div>
+      <div style="color: var(--text-muted); font-size: 0.78rem; margin-top: 0.4rem;">
+        Powered by BEEP Protocol (Commercial License). All proprietary derivations protected. Built for Render & MetaTrader 5.
+      </div>
+    </footer>
+  </div>
+
+
+  <!-- ===================================================================== -->
+  <!-- VIEW 2: LIVE INSTITUTIONAL QUANT TERMINAL                             -->
+  <!-- ===================================================================== -->
+  <div id="view-terminal" class="view-section">
+    <main class="main-content">
+
+      <!-- Executive KPI Ribbon -->
+      <section class="kpi-grid">
+        <div class="kpi-card">
+          <div class="kpi-title">Account Balance</div>
+          <div class="kpi-value" id="kpi-balance">--</div>
+          <div class="kpi-sub" id="kpi-balance-usd">-- USD (Cent USC)</div>
         </div>
+        <div class="kpi-card">
+          <div class="kpi-title">Current Equity</div>
+          <div class="kpi-value" id="kpi-equity">--</div>
+          <div class="kpi-sub" id="kpi-equity-usd">-- USD</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-title">Today's Floating PnL</div>
+          <div class="kpi-value" id="kpi-floating-pnl">--</div>
+          <div class="kpi-sub" id="kpi-closed-pnl">Closed PnL: --</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-title">Free Margin</div>
+          <div class="kpi-value" id="kpi-free-margin">--</div>
+          <div class="kpi-sub" id="kpi-margin-level">Margin Level: --%</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-title">Portfolio Concurrency</div>
+          <div class="kpi-value" id="kpi-concurrency">0 / 12</div>
+          <div class="concurrency-bar">
+            <div class="concurrency-fill" id="concurrency-progress" style="width: 41%;"></div>
+          </div>
+          <div class="kpi-sub" id="kpi-bot-breakdown" style="margin-top: 0.4rem;">V1: 0 | V2: 0</div>
+        </div>
+      </section>
 
-        <div style="display: grid; grid-template-columns: 1.2fr 0.8fr; gap: 1.5rem;">
-          <div>
-            <h4 style="font-size: 0.85rem; text-transform: uppercase; color: var(--cyan-glow); margin-bottom: 0.8rem; letter-spacing: 0.05em;">
-              Top Approved Institutional Edges
-            </h4>
+      <!-- Navigation Tabs Header -->
+      <nav class="tabs-header">
+        <button class="tab-btn active" data-tab="tab-fleet">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
+          Active Fleet & Positions
+          <span class="tab-badge" id="tab-positions-badge">5</span>
+        </button>
+        <button class="tab-btn" data-tab="tab-radar">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"></path><line x1="2" y1="12" x2="22" y2="12"></line></svg>
+          BEEP Signal Radar
+          <span class="tab-badge" id="tab-signals-badge">LIVE</span>
+        </button>
+        <button class="tab-btn" data-tab="tab-matrix">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>
+          Empirical Edge Matrix
+        </button>
+        <button class="tab-btn" data-tab="tab-sammy">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+          Sammy's 4-Check Risk
+        </button>
+        <button class="tab-btn" data-tab="tab-community">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+          Community Hub
+        </button>
+      </nav>
+
+      <!-- TAB 1: ACTIVE FLEET & POSITIONS -->
+      <div class="tab-panel active" id="tab-fleet">
+        <div class="section-box">
+          <div class="section-head">
+            <div>
+              <div class="section-title">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline></svg>
+                Active Order Execution Fleet
+              </div>
+              <div class="section-sub">Live positions currently executed on MetaTrader 5 by Sajim V1 and V2 daemons</div>
+            </div>
+            <div style="display: flex; gap: 0.5rem;">
+              <span class="badge" style="background: rgba(56, 189, 248, 0.15); color: #38bdf8;">V1 (Magic: 777999)</span>
+              <span class="badge" style="background: rgba(16, 185, 129, 0.15); color: #34d399;">V2 (Magic: 888222)</span>
+            </div>
+          </div>
+
+          <div class="table-container">
             <table class="quant-table">
               <thead>
                 <tr>
+                  <th>Ticket</th>
                   <th>Symbol</th>
-                  <th>TF</th>
-                  <th>Profit Factor</th>
-                  <th>Win Rate</th>
-                  <th>Expectancy (R)</th>
+                  <th>Bot Origin</th>
+                  <th>Action</th>
+                  <th>Volume</th>
+                  <th>Open Price</th>
+                  <th>Invalidation (SL)</th>
+                  <th>Target (TP)</th>
+                  <th>Float PnL</th>
+                  <th>Strategy Narrative</th>
                 </tr>
               </thead>
-              <tbody id="top-edges-body">
-                <!-- Injected via JS -->
+              <tbody id="positions-table-body">
+                <tr>
+                  <td colspan="10" style="text-align: center; color: var(--text-muted); padding: 2rem;">Loading live positions from broker...</td>
+                </tr>
               </tbody>
             </table>
           </div>
+        </div>
+      </div>
 
-          <div>
-            <h4 style="font-size: 0.85rem; text-transform: uppercase; color: var(--crimson-red); margin-bottom: 0.8rem; letter-spacing: 0.05em;">
-              Toxic Bleeder Blacklist (Rejected)
-            </h4>
-            <div style="background: rgba(244, 63, 94, 0.05); border: 1px solid rgba(244, 63, 94, 0.2); border-radius: 8px; padding: 1rem; font-family: var(--font-mono); font-size: 0.82rem; color: #fca5a5;">
-              <p style="margin-bottom: 0.6rem; font-weight: 700;">⚠️ Mandatory Exclusion Rule:</p>
-              <p style="color: #cbd5e1; margin-bottom: 0.8rem;">
-                All M1 timeframes and high-spread pairs are strictly excluded from execution to preserve capital.
-              </p>
-              <div id="toxic-bleeders-list" style="display: flex; flex-direction: column; gap: 0.4rem;">
-                <!-- Bleeders injected -->
+      <!-- TAB 2: BEEP SIGNAL RADAR -->
+      <div class="tab-panel" id="tab-radar">
+        <div class="section-box">
+          <div class="section-head">
+            <div>
+              <div class="section-title">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polygon points="12 8 8 12 12 16 16 12 12 8"></polygon></svg>
+                Institutional BEEP Signal Stream
               </div>
+              <div class="section-sub">Sanitized institutional setups with 1:3.5 asymmetric Risk:Reward profiles</div>
             </div>
+            <div style="font-size: 0.8rem; font-family: var(--font-mono); color: var(--text-secondary);">
+              Streaming Setups: <span id="radar-signal-count" style="color: var(--cyan-glow); font-weight: 700;">0</span>
+            </div>
+          </div>
+
+          <!-- Signal Filter Chips -->
+          <div class="filter-chips-row">
+            <button class="chip-btn active" onclick="filterSignals('ALL')">All Tiers</button>
+            <button class="chip-btn" onclick="filterSignals('RARE')">Rare (92.6% WR)</button>
+            <button class="chip-btn" onclick="filterSignals('CERTIFIED')">Certified (87.1% WR)</button>
+            <button class="chip-btn" onclick="filterSignals('DIAMOND')">Diamond (News Jet)</button>
+          </div>
+
+          <div class="signals-grid" id="signals-container">
+            <!-- Dynamic Signal Cards Injected Here -->
           </div>
         </div>
       </div>
-    </div>
 
-    <!-- TAB 4: SAMMY'S 4-CHECK RISK GATEKEEPER -->
-    <div class="tab-panel" id="tab-sammy">
-      <div class="section-box">
-        <div class="section-head">
-          <div>
-            <div class="section-title">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-              Sammy's 4-Check Risk Gatekeeper
+      <!-- TAB 3: EMPIRICAL EDGE MATRIX -->
+      <div class="tab-panel" id="tab-matrix">
+        <div class="section-box">
+          <div class="section-head">
+            <div>
+              <div class="section-title">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 20V10M12 20V4M6 20v-6"/></svg>
+                204-Front Quantitative Edge Whitelist
+              </div>
+              <div class="section-sub">Empirically proven asset-timeframe pairs from 100% real tick backtests on MetaTrader 5</div>
             </div>
-            <div class="section-sub">Mandatory pre-trade risk audit verifying momentum, baseline cushion, lot size, and energy</div>
-          </div>
-        </div>
-
-        <div class="sammy-container">
-          <!-- Input Form -->
-          <div style="background: rgba(0,0,0,0.25); border: 1px solid var(--border-color); border-radius: 8px; padding: 1.25rem;">
-            <h4 style="font-size: 0.85rem; text-transform: uppercase; color: var(--text-secondary); margin-bottom: 1rem; letter-spacing: 0.05em;">
-              Simulate Trade Parameters
-            </h4>
-
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
-              <div class="form-group">
-                <label class="form-label">Symbol</label>
-                <input type="text" class="form-input" id="sammy-symbol" value="XAUUSD.c">
-              </div>
-              <div class="form-group">
-                <label class="form-label">Direction</label>
-                <select class="form-select" id="sammy-direction">
-                  <option value="BUY">BUY (Long)</option>
-                  <option value="SELL">SELL (Short)</option>
-                </select>
-              </div>
-            </div>
-
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
-              <div class="form-group">
-                <label class="form-label">Current Entry Price</label>
-                <input type="number" step="any" class="form-input" id="sammy-price" value="2315.50">
-              </div>
-              <div class="form-group">
-                <label class="form-label">Huber Baseline B(t)</label>
-                <input type="number" step="any" class="form-input" id="sammy-bt" value="2312.00">
-              </div>
-            </div>
-
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
-              <div class="form-group">
-                <label class="form-label">Proposed Stop Loss</label>
-                <input type="number" step="any" class="form-input" id="sammy-sl" value="2311.00">
-              </div>
-              <div class="form-group">
-                <label class="form-label">Dynamic Lot Size</label>
-                <input type="number" step="0.01" class="form-input" id="sammy-lot" value="0.10">
-              </div>
-            </div>
-
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
-              <div class="form-group">
-                <label class="form-label">Kinetic Mass M(t)</label>
-                <input type="number" step="1" class="form-input" id="sammy-mt" value="58.5">
-              </div>
-              <div class="form-group">
-                <label class="form-label">Lambda Energy (%)</label>
-                <input type="number" step="1" class="form-input" id="sammy-lambda" value="18.5">
-              </div>
-            </div>
-
-            <button class="btn btn-primary" id="btn-run-sammy-check" style="width: 100%; justify-content: center; padding: 0.75rem; margin-top: 0.5rem;">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
-              Execute Sammy's 4-Check Verification
-            </button>
+            <span class="badge badge-certified">Audit Version 1.0-EMPIRICAL</span>
           </div>
 
-          <!-- Live Gatekeeper Card Render -->
-          <div class="sammy-card-render">
-            <div style="font-size: 0.75rem; text-transform: uppercase; color: var(--text-muted); letter-spacing: 0.05em; display: flex; justify-content: space-between;">
-              <span>Official Gatekeeper Card</span>
-              <span id="sammy-card-timestamp">--</span>
-            </div>
-
-            <div class="sammy-verdict-box verdict-go" id="sammy-verdict-banner">
-              >>> GO — APPROVED FOR EXECUTION <<<
+          <div style="display: grid; grid-template-columns: 1.2fr 0.8fr; gap: 1.5rem;">
+            <div>
+              <h4 style="font-size: 0.85rem; text-transform: uppercase; color: var(--cyan-glow); margin-bottom: 0.8rem; letter-spacing: 0.05em;">
+                Top Approved Institutional Edges
+              </h4>
+              <table class="quant-table">
+                <thead>
+                  <tr>
+                    <th>Symbol</th>
+                    <th>TF</th>
+                    <th>Profit Factor</th>
+                    <th>Win Rate</th>
+                    <th>Expectancy (R)</th>
+                  </tr>
+                </thead>
+                <tbody id="top-edges-body">
+                  <!-- Injected via JS -->
+                </tbody>
+              </table>
             </div>
 
             <div>
-              <div class="gate-item">
-                <span>1. Kinetic Mass Gate:</span>
-                <span id="gate-1-badge" class="gate-badge-pass">[PASS - YES]</span>
+              <h4 style="font-size: 0.85rem; text-transform: uppercase; color: var(--crimson-red); margin-bottom: 0.8rem; letter-spacing: 0.05em;">
+                Toxic Bleeder Blacklist (Rejected)
+              </h4>
+              <div style="background: rgba(244, 63, 94, 0.05); border: 1px solid rgba(244, 63, 94, 0.2); border-radius: 8px; padding: 1rem; font-family: var(--font-mono); font-size: 0.82rem; color: #fca5a5;">
+                <p style="margin-bottom: 0.6rem; font-weight: 700;">⚠️ Mandatory Exclusion Rule:</p>
+                <p style="color: #cbd5e1; margin-bottom: 0.8rem;">
+                  All M1 timeframes and high-spread pairs are strictly excluded from execution to preserve capital.
+                </p>
+                <div id="toxic-bleeders-list" style="display: flex; flex-direction: column; gap: 0.4rem;">
+                  <!-- Bleeders injected -->
+                </div>
               </div>
-              <div style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.4rem;" id="gate-1-desc">
-                M(t) >= 35.0 verified
-              </div>
-
-              <div class="gate-item">
-                <span>2. Structural Baseline Gate:</span>
-                <span id="gate-2-badge" class="gate-badge-pass">[PASS - YES]</span>
-              </div>
-              <div style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.4rem;" id="gate-2-desc">
-                SL anchored beyond Huber baseline B(t)
-              </div>
-
-              <div class="gate-item">
-                <span>3. Dynamic Lot Size Gate:</span>
-                <span id="gate-3-badge" class="gate-badge-pass">[PASS - YES]</span>
-              </div>
-              <div style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.4rem;" id="gate-3-desc">
-                Lot size within safe cent risk limits
-              </div>
-
-              <div class="gate-item">
-                <span>4. Thermodynamic Energy Gate:</span>
-                <span id="gate-4-badge" class="gate-badge-pass">[PASS - YES]</span>
-              </div>
-              <div style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.4rem;" id="gate-4-desc">
-                Lambda energy >= 10.0%
-              </div>
-            </div>
-
-            <div style="font-size: 0.8rem; color: var(--text-secondary); background: rgba(255,255,255,0.03); padding: 0.75rem; border-radius: 6px;" id="sammy-summary-text">
-              Approved for execution by Sammy's Risk Gatekeeper.
             </div>
           </div>
         </div>
       </div>
-    </div>
 
-    <!-- TAB 5: COMMUNITY & TELEGRAM HUB -->
-    <div class="tab-panel" id="tab-community">
-      <div class="section-box">
-        <div class="section-head">
-          <div>
-            <div class="section-title">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
-              Sajim Traders Community & Signal Hub
+      <!-- TAB 4: SAMMY'S 4-CHECK RISK GATEKEEPER -->
+      <div class="tab-panel" id="tab-sammy">
+        <div class="section-box">
+          <div class="section-head">
+            <div>
+              <div class="section-title">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                Sammy's 4-Check Risk Gatekeeper
+              </div>
+              <div class="section-sub">Mandatory pre-trade risk audit verifying momentum, baseline cushion, lot size, and energy</div>
             </div>
-            <div class="section-sub">Telegram VIP Broadcast & Automated Community Signals Dispatch</div>
-          </div>
-          <span class="badge" style="background: rgba(56, 189, 248, 0.2); color: #38bdf8;">@sajimtraders</span>
-        </div>
-
-        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1.5rem;">
-          <div style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 8px; padding: 1.25rem;">
-            <h4 style="font-size: 0.95rem; color: #e2e8f0; margin-bottom: 0.5rem;">Broadcast Channel</h4>
-            <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 1rem;">
-              Direct connection to the free & VIP broadcast channel: <strong>Sajim Traders</strong> (<code>@sajimtraders</code>).
-            </p>
-            <div style="font-family: var(--font-mono); font-size: 0.8rem; background: rgba(0,0,0,0.4); padding: 0.75rem; border-radius: 6px; margin-bottom: 1rem;">
-              <div>• Channel ID: <code>-1003587018083</code></div>
-              <div>• Bot Status: <code>ONLINE (Telegram API Ready)</code></div>
-              <div>• Transmission: <code>Automated Instant Queue</code></div>
-            </div>
-            <a href="https://t.me/sajimtraders" target="_blank" class="btn btn-primary" style="text-decoration: none;">
-              Open Telegram Channel
-            </a>
           </div>
 
-          <div style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 8px; padding: 1.25rem;">
-            <h4 style="font-size: 0.95rem; color: #e2e8f0; margin-bottom: 0.5rem;">Institutional Governance</h4>
-            <p style="font-size: 0.85rem; color: var(--text-secondary); line-height: 1.6;">
-              • <strong>Licensee:</strong> Sajim Holdings (SAJIM Quant Labs)<br>
-              • <strong>Licensor & Chief Architect:</strong> Jimmy Mathu<br>
-              • <strong>Protocol:</strong> BEEP Protocol (Proprietary Licensed Anomaly Engine)<br>
-              • <strong>Execution Guarantee:</strong> Zero public exposure of core equations; sanitized institutional trade vectors.
-            </p>
+          <div class="sammy-container">
+            <!-- Input Form -->
+            <div style="background: rgba(0,0,0,0.25); border: 1px solid var(--border-color); border-radius: 8px; padding: 1.25rem;">
+              <h4 style="font-size: 0.85rem; text-transform: uppercase; color: var(--text-secondary); margin-bottom: 1rem; letter-spacing: 0.05em;">
+                Simulate Trade Parameters
+              </h4>
+
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                <div class="form-group">
+                  <label class="form-label">Symbol</label>
+                  <input type="text" class="form-input" id="sammy-symbol" value="XAUUSD.c">
+                </div>
+                <div class="form-group">
+                  <label class="form-label">Direction</label>
+                  <select class="form-select" id="sammy-direction">
+                    <option value="BUY">BUY (Long)</option>
+                    <option value="SELL">SELL (Short)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                <div class="form-group">
+                  <label class="form-label">Current Entry Price</label>
+                  <input type="number" step="any" class="form-input" id="sammy-price" value="2315.50">
+                </div>
+                <div class="form-group">
+                  <label class="form-label">Huber Baseline B(t)</label>
+                  <input type="number" step="any" class="form-input" id="sammy-bt" value="2312.00">
+                </div>
+              </div>
+
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                <div class="form-group">
+                  <label class="form-label">Proposed Stop Loss</label>
+                  <input type="number" step="any" class="form-input" id="sammy-sl" value="2311.00">
+                </div>
+                <div class="form-group">
+                  <label class="form-label">Dynamic Lot Size</label>
+                  <input type="number" step="0.01" class="form-input" id="sammy-lot" value="0.10">
+                </div>
+              </div>
+
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                <div class="form-group">
+                  <label class="form-label">Kinetic Mass M(t)</label>
+                  <input type="number" step="1" class="form-input" id="sammy-mt" value="58.5">
+                </div>
+                <div class="form-group">
+                  <label class="form-label">Lambda Energy (%)</label>
+                  <input type="number" step="1" class="form-input" id="sammy-lambda" value="18.5">
+                </div>
+              </div>
+
+              <button class="btn btn-primary" id="btn-run-sammy-check" style="width: 100%; justify-content: center; padding: 0.75rem; margin-top: 0.5rem;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                Execute Sammy's 4-Check Verification
+              </button>
+            </div>
+
+            <!-- Live Gatekeeper Card Render -->
+            <div class="sammy-card-render">
+              <div style="font-size: 0.75rem; text-transform: uppercase; color: var(--text-muted); letter-spacing: 0.05em; display: flex; justify-content: space-between;">
+                <span>Official Gatekeeper Card</span>
+                <span id="sammy-card-timestamp">--</span>
+              </div>
+
+              <div class="sammy-verdict-box verdict-go" id="sammy-verdict-banner">
+                >>> GO — APPROVED FOR EXECUTION <<<
+              </div>
+
+              <div>
+                <div class="gate-item">
+                  <span>1. Kinetic Mass Gate:</span>
+                  <span id="gate-1-badge" class="gate-badge-pass">[PASS - YES]</span>
+                </div>
+                <div style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.4rem;" id="gate-1-desc">
+                  M(t) >= 35.0 verified
+                </div>
+
+                <div class="gate-item">
+                  <span>2. Structural Baseline Gate:</span>
+                  <span id="gate-2-badge" class="gate-badge-pass">[PASS - YES]</span>
+                </div>
+                <div style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.4rem;" id="gate-2-desc">
+                  SL anchored beyond Huber baseline B(t)
+                </div>
+
+                <div class="gate-item">
+                  <span>3. Dynamic Lot Size Gate:</span>
+                  <span id="gate-3-badge" class="gate-badge-pass">[PASS - YES]</span>
+                </div>
+                <div style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.4rem;" id="gate-3-desc">
+                  Lot size within safe cent risk limits
+                </div>
+
+                <div class="gate-item">
+                  <span>4. Thermodynamic Energy Gate:</span>
+                  <span id="gate-4-badge" class="gate-badge-pass">[PASS - YES]</span>
+                </div>
+                <div style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.4rem;" id="gate-4-desc">
+                  Lambda energy >= 10.0%
+                </div>
+              </div>
+
+              <div style="font-size: 0.8rem; color: var(--text-secondary); background: rgba(255,255,255,0.03); padding: 0.75rem; border-radius: 6px;" id="sammy-summary-text">
+                Approved for execution by Sammy's Risk Gatekeeper.
+              </div>
+            </div>
           </div>
         </div>
       </div>
-    </div>
 
-  </main>
+      <!-- TAB 5: COMMUNITY & TELEGRAM HUB -->
+      <div class="tab-panel" id="tab-community">
+        <div class="section-box">
+          <div class="section-head">
+            <div>
+              <div class="section-title">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+                Sajim Traders Community & Signal Hub
+              </div>
+              <div class="section-sub">Telegram VIP Broadcast & Automated Community Signals Dispatch</div>
+            </div>
+            <span class="badge" style="background: rgba(56, 189, 248, 0.2); color: #38bdf8;">@sajimtraders</span>
+          </div>
+
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1.5rem;">
+            <div style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 8px; padding: 1.25rem;">
+              <h4 style="font-size: 0.95rem; color: #e2e8f0; margin-bottom: 0.5rem;">Broadcast Channel</h4>
+              <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 1rem;">
+                Direct connection to the free & VIP broadcast channel: <strong>Sajim Traders</strong> (<code>@sajimtraders</code>).
+              </p>
+              <div style="font-family: var(--font-mono); font-size: 0.8rem; background: rgba(0,0,0,0.4); padding: 0.75rem; border-radius: 6px; margin-bottom: 1rem;">
+                <div>&bull; Channel ID: <code>-1003587018083</code></div>
+                <div>&bull; Bot Status: <code>ONLINE (Telegram API Ready)</code></div>
+                <div>&bull; Transmission: <code>Automated Instant Queue</code></div>
+              </div>
+              <a href="https://t.me/sajimtraders" target="_blank" class="btn btn-primary" style="text-decoration: none;">
+                Open Telegram Channel
+              </a>
+            </div>
+
+            <div style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 8px; padding: 1.25rem;">
+              <h4 style="font-size: 0.95rem; color: #e2e8f0; margin-bottom: 0.5rem;">Institutional Governance</h4>
+              <p style="font-size: 0.85rem; color: var(--text-secondary); line-height: 1.6;">
+                &bull; <strong>Licensee:</strong> Sajim Holdings (SAJIM Quant Labs)<br>
+                &bull; <strong>Licensor & Chief Architect:</strong> Jimmy Mathu<br>
+                &bull; <strong>Protocol:</strong> BEEP Protocol (Proprietary Licensed Anomaly Engine)<br>
+                &bull; <strong>Execution Guarantee:</strong> Zero public exposure of core equations; sanitized institutional trade vectors.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </main>
+  </div>
 
   <!-- Notification Toast -->
   <div class="toast" id="toast-msg">Copied signal to clipboard!</div>

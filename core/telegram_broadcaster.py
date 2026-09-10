@@ -26,6 +26,8 @@ import threading
 import logging
 import urllib.request
 import urllib.parse
+import re
+import html
 from typing import Optional, Dict, Any
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -117,8 +119,28 @@ class TelegramBroadcaster:
                 time.sleep(1.0)
             self.message_queue.task_done()
 
+    @staticmethod
+    def sanitize_telegram_html(text: str) -> str:
+        """
+        Sanitizes arbitrary text containing HTML markup for Telegram's strict HTML parser.
+        Escapes rogue '&', '<', and '>' while preserving valid Telegram HTML tags.
+        """
+        if not text:
+            return ""
+        # 1. Escape ampersands not part of an existing valid entity
+        text = re.sub(r'&(?!(?:amp|lt|gt|quot|#\d+);)', '&amp;', text)
+        # 3. Escape any '<' that is NOT an allowed Telegram HTML tag
+        allowed_tags = r'/?(?:b|strong|i|em|u|s|strike|del|span|tg-spoiler|a|code|pre|blockquote)\b'
+        text = re.sub(rf'<(?!(?:{allowed_tags}))', '&lt;', text, flags=re.IGNORECASE)
+        # 4. Escape any standalone '>' that does not cleanly close a tag
+        text = re.sub(r'(?<=\s)>|(?<=\d)>', '&gt;', text)
+        return text
+
     def _dispatch_http(self, target_chat_id: str, text: str, parse_mode: str = "HTML") -> bool:
-        """Raw HTTP POST request to Telegram Bot API."""
+        """Raw HTTP POST request to Telegram Bot API with pre-flight sanitization."""
+        if parse_mode == "HTML":
+            text = self.sanitize_telegram_html(text)
+
         url = f"https://api.telegram.org/bot{self.bot_token}/sendMessage"
         payload = {
             "chat_id": target_chat_id,
@@ -139,9 +161,11 @@ class TelegramBroadcaster:
                 err_body = e.read().decode("utf-8", errors="replace")
                 logger.error(f"[-] Telegram HTTPError {e.code} on attempt {attempt}: {err_body}")
                 if e.code == 400 and payload.get("parse_mode"):
-                    # Fallback to plain text if formatting fails
-                    logger.info("[!] Retrying Telegram dispatch as plain text fallback...")
+                    # Fallback to clean plain text (strip all HTML tags completely)
+                    logger.info("[!] Retrying Telegram dispatch as clean plain text fallback...")
+                    clean_text = re.sub(r'<[^>]+>', '', text)
                     payload.pop("parse_mode", None)
+                    payload["text"] = clean_text
                     data = urllib.parse.urlencode(payload).encode("utf-8")
                     req = urllib.request.Request(url, data=data, method="POST")
                     continue
