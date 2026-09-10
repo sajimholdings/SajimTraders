@@ -29,7 +29,12 @@ class SupabaseClient {
   // Auth: Sign Up with Email
   async signUp(email: string, password: string, fullName?: string) {
     try {
-      const res = await fetch(`${this.url}/auth/v1/signup`, {
+      const redirectUrl = typeof window !== "undefined" ? window.location.origin : "";
+      const signupEndpoint = redirectUrl
+        ? `${this.url}/auth/v1/signup?redirect_to=${encodeURIComponent(redirectUrl)}`
+        : `${this.url}/auth/v1/signup`;
+
+      const res = await fetch(signupEndpoint, {
         method: "POST",
         headers: this.headers(),
         body: JSON.stringify({
