@@ -15,11 +15,29 @@ for p in (ROOT_DIR, CORE_DIR, VAULT_DIR):
     if p not in sys.path:
         sys.path.insert(0, p)
 
-from .beep_core import BeepCoreEngine
-from .beep_narrative import BeepNarrativeEngine
+# Resilient imports for proprietary engines (Protected by BEEP Licensing)
+try:
+    from .beep_core import BeepCoreEngine
+except ImportError:
+    BeepCoreEngine = None
+
+try:
+    from .beep_narrative import BeepNarrativeEngine
+except ImportError:
+    BeepNarrativeEngine = None
+
 from .sajim_regime_algos import SajimExecutionSuite, AccountProfile
-from .beep_binary_quant_engine import run_binary_quant_simulation
-from .tick_beep_engine import TickBeepEngine
+
+try:
+    from .beep_binary_quant_engine import run_binary_quant_simulation
+except ImportError:
+    run_binary_quant_simulation = None
+
+try:
+    from .tick_beep_engine import TickBeepEngine
+except ImportError:
+    TickBeepEngine = None
+
 from .backtester import BeepBacktester
 from .beep_matrix_scanner import BeepMatrixScanner
 from .mt5_bridge import MetaTraderBridge
@@ -27,7 +45,11 @@ from .beep_broadcast import BeepBroadcastBus
 from .lot_calculator import UniversalLotCalculator
 from .app import SajimBeepClient, display_sammy_card
 from .api import BeepApiHandler
-from .beep_processor import BeepProcessor, BeepSnipeFilter, BeepSnipeEvaluation
+
+try:
+    from .beep_processor import BeepProcessor, BeepSnipeFilter, BeepSnipeEvaluation
+except ImportError:
+    BeepProcessor, BeepSnipeFilter, BeepSnipeEvaluation = None, None, None
 
 __all__ = [
     "BeepCoreEngine",

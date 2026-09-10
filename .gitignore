@@ -21,6 +21,27 @@ overnight_execution.log
 *.pem
 *.key
 
+# Private Proprietary BEEP Core IP & Quant Engines (Strictly Licensed)
+core/beep_core.py
+core/beep_processor.py
+core/beep_binary_quant_engine.py
+core/tick_beep_engine.py
+core/beep_narrative.py
+
+# Confidential Agreements & Internal Math Theory
+docs/BEEP_*
+docs/SAJIM_HOLDINGS_AGREEMENT.md
+docs/GRAND_CONFLUENCE_AUDIT_REPORT.md
+
+# Sensitive Broker & User Credentials
+config/broker_config.json
+config/telegram_config.json
+config/client_accounts.json
+
+# Private BEEP Math Tests
+test/*beep*
+tests/*beep*
+
 # IDE / Editor artifacts
 .vscode/
 .idea/
