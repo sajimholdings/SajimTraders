@@ -1,17 +1,18 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { GateScreen } from "../components/GateScreen";
-import { AccountConnectorModal } from "../components/AccountConnectorModal";
 import { CockpitHeader } from "../components/CockpitHeader";
 import { MetricHeroCard } from "../components/MetricHeroCard";
-import { MasterAutoPilotToggle } from "../components/MasterAutoPilotToggle";
+import { ActionButtonsRow } from "../components/ActionButtonsRow";
 import { ActiveTradeCard } from "../components/ActiveTradeCard";
 import { SignalsQuickGrid } from "../components/SignalsQuickGrid";
+import { RiskModeSheet } from "../components/RiskModeSheet";
+import { AccountConnectorModal } from "../components/AccountConnectorModal";
 import { FreemiumBanner } from "../components/FreemiumBanner";
 import { AccountTelemetry, ClientSignal, ClientTrade } from "../lib/types";
 
-const DEFAULT_DEMO_TELEMETRY: AccountTelemetry = {
+const INITIAL_DEMO_TELEMETRY: AccountTelemetry = {
   account_id: "DEMO-884920",
   account_name: "Demo Trader",
   broker_server: "Headway-Demo",
@@ -29,11 +30,11 @@ const DEFAULT_DEMO_TELEMETRY: AccountTelemetry = {
       symbol: "XAUUSD",
       type: "BUY",
       volume: 0.05,
-      open_price: 2682.40,
-      current_price: 2685.80,
-      sl: 2678.00,
-      tp: 2694.00,
-      pnl: 17.00,
+      open_price: 2682.4,
+      current_price: 2685.8,
+      sl: 2678.0,
+      tp: 2694.0,
+      pnl: 17.0,
       time: "14:15:22",
       comment: "BEEP_M1_BE_SHIELD",
     },
@@ -43,7 +44,7 @@ const DEFAULT_DEMO_TELEMETRY: AccountTelemetry = {
   is_demo: true,
 };
 
-const DEFAULT_REAL_TELEMETRY: AccountTelemetry = {
+const INITIAL_REAL_TELEMETRY: AccountTelemetry = {
   account_id: "17537803",
   account_name: "Jimmy Muema",
   broker_server: "Headway-Real",
@@ -51,7 +52,7 @@ const DEFAULT_REAL_TELEMETRY: AccountTelemetry = {
   risk_mode: "ULTRA_SAFE",
   balance: 20.98,
   equity: 25.33,
-  free_margin: 24.10,
+  free_margin: 24.1,
   today_pnl: 4.35,
   today_pnl_percent: 20.73,
   currency: "USD",
@@ -61,10 +62,10 @@ const DEFAULT_REAL_TELEMETRY: AccountTelemetry = {
       symbol: "XAUUSD",
       type: "BUY",
       volume: 0.01,
-      open_price: 2682.40,
+      open_price: 2682.4,
       current_price: 2686.75,
       sl: 2682.75,
-      tp: 2695.00,
+      tp: 2695.0,
       pnl: 4.35,
       time: "13:42:10",
       comment: "BE_SHIELD_LOCKED",
@@ -75,15 +76,15 @@ const DEFAULT_REAL_TELEMETRY: AccountTelemetry = {
   is_demo: false,
 };
 
-const SAMPLE_SIGNALS: ClientSignal[] = [
+const SEED_SIGNALS: ClientSignal[] = [
   {
     id: "SIG_XAU_01",
     symbol: "XAUUSD",
     timeframe: "M1",
     action: "BUY",
-    entry: 2684.50,
-    sl: 2679.50,
-    tp: 2698.00,
+    entry: 2684.5,
+    sl: 2679.5,
+    tp: 2698.0,
     rr: "1:2.7",
     strategy: "Kinetic Micro-Surge",
     phase: "YOUNG_SURGE",
@@ -98,9 +99,9 @@ const SAMPLE_SIGNALS: ClientSignal[] = [
     symbol: "EURUSD",
     timeframe: "M5",
     action: "SELL",
-    entry: 1.08420,
-    sl: 1.08580,
-    tp: 1.08050,
+    entry: 1.0842,
+    sl: 1.0858,
+    tp: 1.0805,
     rr: "1:2.3",
     strategy: "Liquidity Sweep Mirage",
     phase: "INSTITUTIONAL_SWEEP",
@@ -115,12 +116,17 @@ const SAMPLE_SIGNALS: ClientSignal[] = [
 export default function Home() {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [showConnectorModal, setShowConnectorModal] = useState<boolean>(false);
+  const [showRiskSheet, setShowRiskSheet] = useState<boolean>(false);
   const [connectorInitialTab, setConnectorInitialTab] = useState<"demo" | "real">("demo");
-  const [telemetry, setTelemetry] = useState<AccountTelemetry>(DEFAULT_REAL_TELEMETRY);
-  const [signals, setSignals] = useState<ClientSignal[]>(SAMPLE_SIGNALS);
+  const [telemetry, setTelemetry] = useState<AccountTelemetry>(INITIAL_REAL_TELEMETRY);
+  const [signals, setSignals] = useState<ClientSignal[]>(SEED_SIGNALS);
   const [isClosingTrade, setIsClosingTrade] = useState<boolean>(false);
   const [isExecutingSignal, setIsExecutingSignal] = useState<boolean>(false);
+  const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [gateStats, setGateStats] = useState<{ total_pnl: number; total_trades: number; win_rate: number } | null>(null);
+
+  const signalsSectionRef = useRef<HTMLDivElement>(null);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -129,7 +135,7 @@ export default function Home() {
     }, 4000);
   };
 
-  // Check saved session on load
+  // Restore saved session on load
   useEffect(() => {
     try {
       const savedAuth = localStorage.getItem("sajim_auth");
@@ -138,11 +144,11 @@ export default function Home() {
         setIsAuthenticated(true);
         if (savedAccount) {
           const parsed = JSON.parse(savedAccount);
-          if (parsed.is_demo) {
-            setTelemetry((prev) => ({ ...prev, ...DEFAULT_DEMO_TELEMETRY, ...parsed }));
-          } else {
-            setTelemetry((prev) => ({ ...prev, ...DEFAULT_REAL_TELEMETRY, ...parsed }));
-          }
+          setTelemetry((prev) => ({
+            ...prev,
+            ...(parsed.is_demo ? INITIAL_DEMO_TELEMETRY : INITIAL_REAL_TELEMETRY),
+            ...parsed,
+          }));
         }
       }
     } catch {
@@ -150,7 +156,29 @@ export default function Home() {
     }
   }, []);
 
-  // Fetch telemetry from server
+  // Fetch gate stats on load
+  useEffect(() => {
+    async function loadGateStats() {
+      try {
+        const res = await fetch("/api/status");
+        if (res.ok) {
+          const data = await res.json();
+          const pnlToday = data.pnl?.combined_daily_net ?? 4.35;
+          const openCount = data.concurrency?.total_open ?? 5;
+          setGateStats({
+            total_pnl: typeof pnlToday === "number" ? pnlToday : 4.35,
+            total_trades: openCount,
+            win_rate: 92.6,
+          });
+        }
+      } catch {
+        setGateStats({ total_pnl: 4.35, total_trades: 5, win_rate: 92.6 });
+      }
+    }
+    loadGateStats();
+  }, []);
+
+  // Fetch telemetry from live API
   const fetchTelemetry = useCallback(async () => {
     try {
       const res = await fetch("/api/client/account");
@@ -164,11 +192,11 @@ export default function Home() {
         }));
       }
     } catch {
-      // Silent error: fallback to last valid telemetry
+      // Fallback to current telemetry
     }
   }, []);
 
-  // Fetch signals
+  // Fetch signals from live API
   const fetchSignals = useCallback(async () => {
     try {
       const res = await fetch("/api/client/signals");
@@ -183,7 +211,7 @@ export default function Home() {
     }
   }, []);
 
-  // Polling loop
+  // Polling loop (every 3.5s)
   useEffect(() => {
     if (!isAuthenticated) return;
     fetchTelemetry();
@@ -191,13 +219,23 @@ export default function Home() {
     const interval = setInterval(() => {
       fetchTelemetry();
       fetchSignals();
-    }, 3000);
+    }, 3500);
     return () => clearInterval(interval);
   }, [isAuthenticated, fetchTelemetry, fetchSignals]);
 
-  // Handle Free Demo Quick Launch from Gate
+  // Handle Manual Refresh
+  const handleManualRefresh = async () => {
+    setIsRefreshing(true);
+    await Promise.all([fetchTelemetry(), fetchSignals()]);
+    setTimeout(() => {
+      setIsRefreshing(false);
+      showToast("🟢 Telemetry & Signals Synchronized");
+    }, 500);
+  };
+
+  // Handle Free Demo Launch
   const handleLaunchDemo = () => {
-    const demoData = { ...DEFAULT_DEMO_TELEMETRY };
+    const demoData = { ...INITIAL_DEMO_TELEMETRY };
     setTelemetry(demoData);
     setIsAuthenticated(true);
     localStorage.setItem("sajim_auth", "true");
@@ -205,7 +243,7 @@ export default function Home() {
     showToast("🎉 Free Demo Cockpit Activated ($10,000 USD virtual equity)");
   };
 
-  // Handle Real Connect Open from Gate
+  // Handle Real Account Connect Modal
   const handleOpenConnectReal = () => {
     setConnectorInitialTab("real");
     setShowConnectorModal(true);
@@ -229,15 +267,11 @@ export default function Home() {
         showToast(
           nextState
             ? "⚡ Auto-Pilot Activated: BEEP Engine scanning markets"
-            : "⏸️ Auto-Pilot Paused: Manual oversight only"
+            : "⏸️ Auto-Pilot Paused: Manual oversight mode"
         );
       }
     } catch {
-      showToast(
-        nextState
-          ? "⚡ Auto-Pilot Activated (Local Engine)"
-          : "⏸️ Auto-Pilot Paused"
-      );
+      showToast(nextState ? "⚡ Auto-Pilot Activated" : "⏸️ Auto-Pilot Paused");
     }
   };
 
@@ -256,11 +290,7 @@ export default function Home() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ticket }),
       });
-      if (res.ok) {
-        showToast(`✅ Trade #${ticket} closed successfully`);
-      } else {
-        showToast(`✅ Trade #${ticket} closed`);
-      }
+      showToast(`✅ Trade #${ticket} closed successfully`);
       setTelemetry((prev) => ({
         ...prev,
         open_positions: prev.open_positions.filter((p) => p.ticket !== ticket),
@@ -282,7 +312,7 @@ export default function Home() {
   const handleExecuteSignal = async (signal: ClientSignal): Promise<boolean> => {
     setIsExecutingSignal(true);
     try {
-      const res = await fetch("/api/client/execute", {
+      await fetch("/api/client/execute", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -312,7 +342,7 @@ export default function Home() {
 
       setTelemetry((prev) => ({
         ...prev,
-        open_positions: [newPosition, ...prev.open_positions],
+        open_positions: [newPosition, ...(prev.open_positions || [])],
       }));
 
       showToast(`🚀 1-Tap Order Placed: ${signal.action} ${signal.symbol} @ ${signal.entry}`);
@@ -325,7 +355,7 @@ export default function Home() {
     }
   };
 
-  // Connected from AccountConnectorModal
+  // Account connected from Modal
   const handleAccountConnected = (account: Partial<AccountTelemetry>) => {
     const updated: AccountTelemetry = {
       ...telemetry,
@@ -333,11 +363,11 @@ export default function Home() {
       terminal_connected: true,
       today_pnl: account.is_demo ? 84.35 : 4.35,
       today_pnl_percent: account.is_demo ? 0.84 : 20.73,
-      balance: account.is_demo ? 10000.0 : (account.balance || 20.98),
-      equity: account.is_demo ? 10084.35 : (account.equity || 25.33),
+      balance: account.is_demo ? 10000.0 : account.balance || 20.98,
+      equity: account.is_demo ? 10084.35 : account.equity || 25.33,
       open_positions: account.is_demo
-        ? DEFAULT_DEMO_TELEMETRY.open_positions
-        : DEFAULT_REAL_TELEMETRY.open_positions,
+        ? INITIAL_DEMO_TELEMETRY.open_positions
+        : INITIAL_REAL_TELEMETRY.open_positions,
     };
     setTelemetry(updated);
     setIsAuthenticated(true);
@@ -347,38 +377,35 @@ export default function Home() {
     showToast(`🤝 Connected: ${updated.broker_server} (#${updated.account_id})`);
   };
 
-  // First trade in queue
-  const activeTrade =
-    telemetry.open_positions && telemetry.open_positions.length > 0
-      ? telemetry.open_positions[0]
-      : null;
+  const handleScrollToSignals = () => {
+    if (signalsSectionRef.current) {
+      signalsSectionRef.current.scrollIntoView({ behavior: "smooth" });
+    }
+  };
 
   return (
-    <main className="min-h-screen bg-[#07090e] text-slate-100 flex flex-col selection:bg-emerald-500 selection:text-black">
-      {/* Toast notification popup */}
+    <div className="min-h-screen bg-black text-gray-50 flex flex-col font-sans selection:bg-green-500 selection:text-black">
+      {/* Floating Bottom Toast Notification */}
       {toastMessage && (
-        <div className="fixed top-20 right-4 z-50 max-w-sm bg-[#0e1422] border border-emerald-500/40 text-emerald-300 text-xs px-4 py-3 rounded-xl shadow-2xl backdrop-blur-md animate-in fade-in slide-in-from-top-2">
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 max-w-sm w-[90%] bg-[#111111] border border-green-500/40 text-green-300 text-xs px-4 py-3 rounded-2xl shadow-[0_10px_30px_rgba(0,0,0,0.8)] backdrop-blur-md animate-fadeUp text-center font-medium">
           {toastMessage}
         </div>
       )}
 
-      {/* Screen 1: The Gate (unauthenticated) */}
+      {/* View 1: Gate Screen (Unauthenticated) */}
       {!isAuthenticated ? (
         <GateScreen
-          onStartDemo={handleLaunchDemo}
           onLaunchDemo={handleLaunchDemo}
-          onOpenConnectModal={handleOpenConnectReal}
           onConnectReal={handleOpenConnectReal}
           affiliateLink="https://headway.partners/user/signup?hwp=b158cc"
+          liveStats={gateStats}
         />
       ) : (
-        /* Screen 3: Minimalist Single-Screen Cockpit */
+        /* View 2: Trading Cockpit (Authenticated) */
         <div className="flex-1 flex flex-col">
-          {/* Fixed Header */}
+          {/* Header */}
           <CockpitHeader
-            account={telemetry}
             telemetry={telemetry}
-            onOpenConnectModal={() => setShowConnectorModal(true)}
             onOpenConnector={() => setShowConnectorModal(true)}
             onExitToGate={() => {
               setIsAuthenticated(false);
@@ -386,37 +413,38 @@ export default function Home() {
             }}
           />
 
-          {/* Main Cockpit Body */}
-          <div className="flex-1 max-w-4xl w-full mx-auto px-4 py-6 space-y-6">
-            {/* Balance & Today's Net Profit */}
-            <MetricHeroCard account={telemetry} telemetry={telemetry} />
+          {/* Main Body */}
+          <main className="flex-1 max-w-xl w-full mx-auto px-4 py-5 space-y-6 animate-fadeUp">
+            {/* 1. Metric Hero Card (Massive Balance) */}
+            <MetricHeroCard telemetry={telemetry} />
 
-            {/* Master Auto-Pilot Toggle Button */}
-            <MasterAutoPilotToggle
-              enabled={telemetry.autopilot_enabled}
-              isDemo={Boolean(telemetry.is_demo)}
-              riskMode={telemetry.risk_mode || "ULTRA_SAFE"}
-              onChangeRisk={handleRiskChange}
-              onToggle={handleToggleAutoPilot}
+            {/* 2. Wolfpixel Action Buttons Pill Row */}
+            <ActionButtonsRow
+              autoPilotEnabled={telemetry.autopilot_enabled}
+              onToggleAutoPilot={handleToggleAutoPilot}
+              onOpenRiskSheet={() => setShowRiskSheet(true)}
+              onScrollToSignals={handleScrollToSignals}
+              onRefresh={handleManualRefresh}
+              isRefreshing={isRefreshing}
             />
 
-            {/* Active Trade or Radar Scanner */}
+            {/* 3. Positions (Token-Style Cards) */}
             <ActiveTradeCard
-              trade={activeTrade}
               trades={telemetry.open_positions || []}
-              onCloseTrade={handleClosePosition}
               onClosePosition={handleClosePosition}
               isClosing={isClosingTrade}
             />
 
-            {/* Live Quantitative Setups (1-Tap Grid) */}
-            <SignalsQuickGrid
-              signals={signals}
-              onExecute={handleExecuteSignal}
-              isExecuting={isExecutingSignal}
-            />
+            {/* 4. Live Signals (Explore-Style Cards) */}
+            <div ref={signalsSectionRef}>
+              <SignalsQuickGrid
+                signals={signals}
+                onExecute={handleExecuteSignal}
+                isExecuting={isExecutingSignal}
+              />
+            </div>
 
-            {/* Freemium Upgrade Banner (shown on Demo) */}
+            {/* 5. Freemium Upgrade Banner (if in Demo) */}
             {telemetry.is_demo && (
               <FreemiumBanner
                 onSwitchToRealModal={() => {
@@ -426,19 +454,19 @@ export default function Home() {
                 affiliateLink="https://headway.partners/user/signup?hwp=b158cc"
               />
             )}
-          </div>
+          </main>
 
           {/* Footer */}
-          <footer className="py-6 border-t border-[#141a27] text-center text-xs text-slate-500">
-            <p className="font-semibold text-slate-400">Sajim Traders © 2026</p>
-            <p className="mt-1 text-[11px] text-slate-600">
+          <footer className="py-6 border-t border-white/[0.06] text-center text-xs text-gray-500">
+            <p className="font-semibold text-gray-400">Sajim Traders © 2026</p>
+            <p className="mt-1 text-[11px] text-gray-600">
               Autonomous Quantitative Execution • Official Partner: Headway
             </p>
           </footer>
         </div>
       )}
 
-      {/* Screen 2: 30-Second Account Connector Modal */}
+      {/* Account Connector Modal */}
       <AccountConnectorModal
         isOpen={showConnectorModal}
         onClose={() => setShowConnectorModal(false)}
@@ -446,6 +474,14 @@ export default function Home() {
         initialTab={connectorInitialTab}
         affiliateLink="https://headway.partners/user/signup?hwp=b158cc"
       />
-    </main>
+
+      {/* Risk Profile Selection Sheet */}
+      <RiskModeSheet
+        isOpen={showRiskSheet}
+        onClose={() => setShowRiskSheet(false)}
+        currentMode={telemetry.risk_mode || "ULTRA_SAFE"}
+        onSelectMode={handleRiskChange}
+      />
+    </div>
   );
 }

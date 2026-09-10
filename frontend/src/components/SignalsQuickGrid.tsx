@@ -1,175 +1,179 @@
 "use client";
 
-import React, { useState } from "react";
-import { Zap, TrendingUp, TrendingDown, Target, Shield, CheckCircle2 } from "lucide-react";
-import { ClientSignal } from "../lib/types";
+import React, { useState, useCallback } from "react";
+import { Zap, CheckCircle2 } from "lucide-react";
+import type { ClientSignal } from "../lib/types";
 
 interface SignalsQuickGridProps {
   signals: ClientSignal[];
   onExecute: (signal: ClientSignal) => Promise<boolean>;
-  isExecuting?: boolean;
+  isExecuting: boolean;
 }
 
 export const SignalsQuickGrid: React.FC<SignalsQuickGridProps> = ({
   signals,
   onExecute,
-  isExecuting = false,
+  isExecuting,
 }) => {
-  const [executedIds, setExecutedIds] = useState<Record<string, boolean>>({});
+  const [executedIds, setExecutedIds] = useState<Set<string>>(new Set());
   const [loadingId, setLoadingId] = useState<string | null>(null);
 
-  const handleTap = async (signal: ClientSignal) => {
-    if (loadingId || executedIds[signal.id]) return;
-    setLoadingId(signal.id);
-    try {
-      const success = await onExecute(signal);
-      if (success) {
-        setExecutedIds((prev) => ({ ...prev, [signal.id]: true }));
+  const handleTap = useCallback(
+    async (signal: ClientSignal) => {
+      if (executedIds.has(signal.id) || loadingId || isExecuting) return;
+      setLoadingId(signal.id);
+      try {
+        const success = await onExecute(signal);
+        if (success) {
+          setExecutedIds((prev) => new Set(prev).add(signal.id));
+        }
+      } finally {
+        setLoadingId(null);
       }
-    } finally {
-      setLoadingId(null);
-    }
-  };
-
-  if (!signals || signals.length === 0) {
-    return (
-      <div className="bg-[#0e121b] border border-[#1a2233] rounded-2xl p-6 text-center shadow-xl">
-        <div className="w-10 h-10 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 flex items-center justify-center mx-auto mb-3">
-          <Zap className="w-5 h-5 animate-pulse" />
-        </div>
-        <h4 className="text-sm font-semibold text-white">Scanning Active Markets</h4>
-        <p className="text-xs text-slate-400 mt-1 max-w-xs mx-auto">
-          Scanning XAUUSD, EURUSD & US30 for institutional liquidity setups with high statistical edge.
-        </p>
-      </div>
-    );
-  }
+    },
+    [executedIds, loadingId, isExecuting, onExecute]
+  );
 
   return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between px-1">
-        <div className="flex items-center gap-2">
-          <div className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-          <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-            Live Quantitative Setups
-          </h3>
+    <section className="space-y-4">
+      {/* Section Header */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2.5">
+          <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
+          <h2 className="text-white text-lg font-bold tracking-tight">
+            Live Signals
+          </h2>
         </div>
-        <span className="text-[11px] font-medium text-emerald-400/90 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
-          {signals.length} Setups Ready
+        <span className="text-[11px] font-semibold text-green-400 bg-green-500/10 border border-green-500/20 px-2.5 py-1 rounded-full">
+          {signals.length} Ready
         </span>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        {signals.map((signal) => {
-          const isBuy = signal.action === "BUY";
-          const isExecuted = executedIds[signal.id];
-          const isLoading = loadingId === signal.id;
+      {/* Empty State */}
+      {signals.length === 0 && (
+        <div className="bg-[#111111] border border-white/[0.06] rounded-2xl p-6 text-center">
+          <Zap className="w-8 h-8 text-green-400 mx-auto mb-3 animate-pulse" />
+          <p className="text-white font-semibold text-sm mb-1">
+            Scanning Active Markets
+          </p>
+          <p className="text-gray-500 text-xs">
+            Analyzing XAUUSD, EURUSD, GBPJPY and more for high-probability
+            setups…
+          </p>
+        </div>
+      )}
 
-          return (
-            <div
-              key={signal.id}
-              className="bg-[#0e121b] border border-[#1a2233] hover:border-[#2a364f] transition-all rounded-2xl p-4 flex flex-col justify-between shadow-lg relative overflow-hidden group"
-            >
-              {/* Subtle top indicator bar */}
+      {/* Signal Cards Grid */}
+      {signals.length > 0 && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {signals.map((signal) => {
+            const isBuy = signal.action === "BUY";
+            const executed = executedIds.has(signal.id);
+            const loading = loadingId === signal.id;
+            const disabled = executed || loading || isExecuting;
+
+            return (
               <div
-                className={`absolute top-0 left-0 right-0 h-[2px] ${
-                  isBuy ? "bg-emerald-500" : "bg-rose-500"
-                }`}
-              />
+                key={signal.id}
+                className="relative bg-[#111111] border border-white/[0.06] rounded-2xl p-4 overflow-hidden hover:border-white/10 transition-colors"
+              >
+                {/* Top accent line */}
+                <div
+                  className={`absolute top-0 left-0 right-0 h-[2px] ${
+                    isBuy ? "bg-green-400" : "bg-red-400"
+                  }`}
+                />
 
-              <div>
-                {/* Header: Symbol, Action badge, Probability */}
-                <div className="flex items-center justify-between mb-3">
+                {/* Header Row */}
+                <div className="flex items-start justify-between mb-3">
                   <div className="flex items-center gap-2">
-                    <span className="text-base font-bold text-white tracking-wide">
+                    <span className="text-base font-bold text-white">
                       {signal.symbol}
                     </span>
                     <span
-                      className={`text-[10px] font-bold px-2 py-0.5 rounded flex items-center gap-1 ${
+                      className={`text-[10px] font-bold px-2 py-0.5 rounded ${
                         isBuy
-                          ? "bg-emerald-500/15 text-emerald-400 border border-emerald-500/30"
-                          : "bg-rose-500/15 text-rose-400 border border-rose-500/30"
+                          ? "bg-green-500/15 text-green-400"
+                          : "bg-red-500/15 text-red-400"
                       }`}
                     >
-                      {isBuy ? (
-                        <TrendingUp className="w-3 h-3" />
-                      ) : (
-                        <TrendingDown className="w-3 h-3" />
-                      )}
                       {signal.action}
                     </span>
-                    <span className="text-[11px] font-medium text-slate-400">
+                    <span className="text-gray-500 text-[11px]">
                       {signal.timeframe}
                     </span>
                   </div>
-
                   <div className="text-right">
-                    <div className="text-[11px] font-semibold text-emerald-400">
-                      {signal.win_probability || "84.2%"} Win Edge
-                    </div>
-                    <div className="text-[9px] text-slate-500 uppercase tracking-wider">
-                      {signal.strategy || "Statistical Edge"}
-                    </div>
+                    <p className="text-green-400 text-xs font-bold">
+                      {signal.win_probability}
+                    </p>
+                    <p className="text-gray-500 text-[10px]">
+                      {signal.strategy}
+                    </p>
                   </div>
                 </div>
 
-                {/* Price targets & estimated USD gain/risk */}
-                <div className="grid grid-cols-3 gap-2 bg-[#080a0f] p-2.5 rounded-xl border border-[#141a27] mb-3 text-center">
+                {/* Price Grid */}
+                <div className="bg-black/50 rounded-xl p-2.5 grid grid-cols-3 gap-2 text-center mb-3">
                   <div>
-                    <div className="text-[10px] text-slate-500 uppercase font-medium">Entry</div>
-                    <div className="text-xs font-mono font-bold text-slate-200 mt-0.5">
-                      {signal.entry.toFixed(2)}
-                    </div>
+                    <p className="text-gray-500 text-[10px] mb-0.5">Entry</p>
+                    <p className="text-white text-xs font-mono font-semibold">
+                      {signal.entry}
+                    </p>
                   </div>
                   <div>
-                    <div className="text-[10px] text-emerald-400 uppercase font-medium flex items-center justify-center gap-0.5">
-                      <Target className="w-2.5 h-2.5" /> TP ({signal.rr || "1:3"})
-                    </div>
-                    <div className="text-xs font-mono font-bold text-emerald-300 mt-0.5">
-                      {signal.gain_estimate_usd || `+${(signal.tp - signal.entry).toFixed(2)}`}
-                    </div>
+                    <p className="text-green-400 text-[10px] mb-0.5">
+                      TP ({signal.rr})
+                    </p>
+                    <p className="text-green-400 text-xs font-mono font-semibold">
+                      {signal.gain_estimate_usd}
+                    </p>
                   </div>
                   <div>
-                    <div className="text-[10px] text-rose-400 uppercase font-medium flex items-center justify-center gap-0.5">
-                      <Shield className="w-2.5 h-2.5" /> Stop (Risk)
-                    </div>
-                    <div className="text-xs font-mono font-bold text-rose-300 mt-0.5">
-                      {signal.risk_estimate_usd || `-${(signal.entry - signal.sl).toFixed(2)}`}
-                    </div>
+                    <p className="text-red-400 text-[10px] mb-0.5">Risk</p>
+                    <p className="text-red-400 text-xs font-mono font-semibold">
+                      {signal.risk_estimate_usd}
+                    </p>
                   </div>
                 </div>
+
+                {/* Execute Button */}
+                <button
+                  disabled={disabled}
+                  onClick={() => handleTap(signal)}
+                  className={`w-full rounded-xl py-2.5 text-xs font-bold flex items-center justify-center gap-1.5 transition-all ${
+                    executed
+                      ? "bg-green-500/10 text-green-400 border border-green-500/20 cursor-default"
+                      : loading
+                      ? isBuy
+                        ? "bg-green-500/60 text-black cursor-wait"
+                        : "bg-red-500/60 text-white cursor-wait"
+                      : isBuy
+                      ? "bg-green-500 text-black hover:bg-green-400 active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed"
+                      : "bg-red-500 text-white hover:bg-red-400 active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed"
+                  }`}
+                >
+                  {executed ? (
+                    <>
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      Sent to MT5
+                    </>
+                  ) : loading ? (
+                    <div className="border-2 border-current border-t-transparent rounded-full animate-spin w-4 h-4" />
+                  ) : (
+                    <>
+                      <Zap className="w-3.5 h-3.5" />
+                      ⚡ 1-Tap Execute ({signal.action} {signal.symbol})
+                    </>
+                  )}
+                </button>
               </div>
-
-              {/* Execution Action Button */}
-              <button
-                onClick={() => handleTap(signal)}
-                disabled={isExecuted || isLoading || isExecuting}
-                className={`w-full py-2.5 px-4 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 ${
-                  isExecuted
-                    ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 cursor-default"
-                    : isBuy
-                    ? "bg-emerald-500 hover:bg-emerald-400 text-black shadow-lg shadow-emerald-500/20 active:scale-[0.98]"
-                    : "bg-rose-500 hover:bg-rose-400 text-white shadow-lg shadow-rose-500/20 active:scale-[0.98]"
-                }`}
-              >
-                {isLoading ? (
-                  <span className="inline-block w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
-                ) : isExecuted ? (
-                  <>
-                    <CheckCircle2 className="w-4 h-4" />
-                    Order Placed to MT5
-                  </>
-                ) : (
-                  <>
-                    <Zap className="w-4 h-4 fill-current" />
-                    1-Tap Execute ({signal.action} {signal.symbol})
-                  </>
-                )}
-              </button>
-            </div>
-          );
-        })}
-      </div>
-    </div>
+            );
+          })}
+        </div>
+      )}
+    </section>
   );
 };
+
+export default SignalsQuickGrid;

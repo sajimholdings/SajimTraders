@@ -1,82 +1,79 @@
 "use client";
 
 import React from "react";
-import Image from "next/image";
 import { LogOut, ChevronDown } from "lucide-react";
 import { AccountTelemetry } from "../lib/types";
 
 interface CockpitHeaderProps {
-  account?: AccountTelemetry;
-  telemetry?: AccountTelemetry;
-  onOpenConnectModal?: () => void;
-  onOpenConnector?: () => void;
-  onExitToGate?: () => void;
+  telemetry: AccountTelemetry;
+  onOpenConnector: () => void;
+  onExitToGate: () => void;
 }
 
 export const CockpitHeader: React.FC<CockpitHeaderProps> = ({
-  account,
   telemetry,
-  onOpenConnectModal,
   onOpenConnector,
   onExitToGate,
 }) => {
-  const acc = account || telemetry || {
-    account_id: "17537803",
-    account_name: "Jimmy Muema",
-    broker_server: "Headway-Real",
-    terminal_connected: true,
-  } as AccountTelemetry;
-
-  const handleOpen = onOpenConnectModal || onOpenConnector || (() => {});
-  const handleExit = onExitToGate || (() => {});
-  const brokerShort = (acc.broker_server || "Headway").split("-")[0];
+  const name = telemetry.account_name || "Trader";
+  const initial = name.charAt(0).toUpperCase();
+  const connected = telemetry.terminal_connected;
+  const brokerShort = (telemetry.broker_server || "Broker").split("-")[0];
 
   return (
-    <header className="sticky top-0 z-40 bg-[#07090e]/90 backdrop-blur-md border-b border-white/10 px-4 py-3 flex items-center justify-between">
-      <div
-        className="flex items-center gap-2.5 cursor-pointer hover:opacity-90 transition-opacity"
-        onClick={handleExit}
-      >
-        <div className="relative w-8 h-8 rounded-lg overflow-hidden border border-emerald-500/40 bg-white p-0.5 shadow-sm">
-          <Image
-            src="/assets/sajim_logo.png"
-            alt="Sajim Logo"
-            width={32}
-            height={32}
-            className="object-contain w-full h-full"
-          />
+    <header className="sticky top-0 z-40 bg-black/90 backdrop-blur-md border-b border-white/[0.06] px-4 py-3">
+      {/* Top row */}
+      <div className="flex items-center justify-between">
+        {/* Left — greeting */}
+        <div className="flex flex-col">
+          <span className="text-xs text-gray-500">Welcome back,</span>
+          <span className="text-sm font-bold text-white">{name}</span>
         </div>
-        <div>
-          <div className="flex items-center gap-1.5 leading-none">
-            <span className="font-extrabold text-sm tracking-tight text-white">SAJIM</span>
-            <span className="font-extrabold text-sm tracking-tight text-emerald-400">TRADERS</span>
+
+        {/* Right — avatar + exit */}
+        <div className="flex items-center gap-3">
+          {/* Avatar */}
+          <div className="relative">
+            <div
+              className={`w-9 h-9 rounded-full bg-[#111111] flex items-center justify-center border-2 ${
+                connected ? "border-green-500" : "border-yellow-500"
+              }`}
+            >
+              <span className="text-sm font-bold text-white">{initial}</span>
+            </div>
+            {connected && (
+              <span className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-400 rounded-full ring-2 ring-black animate-livePulse" />
+            )}
           </div>
-          <span className="text-[10px] font-bold text-emerald-400 tracking-wider">V2 AUTO-PILOT</span>
+
+          {/* Exit button */}
+          <button
+            type="button"
+            onClick={onExitToGate}
+            title="Exit to Gate"
+            className="p-2 rounded-full bg-[#111111] hover:bg-white/10 text-gray-500 hover:text-white transition-colors cursor-pointer"
+          >
+            <LogOut className="w-4 h-4" />
+          </button>
         </div>
       </div>
 
-      <div className="flex items-center gap-2">
+      {/* Account pill */}
+      <div className="mt-2">
         <button
           type="button"
-          onClick={handleOpen}
-          className="flex items-center gap-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-full px-3 py-1.5 text-xs font-semibold text-slate-200 transition-all hover:border-sky-400/40 cursor-pointer"
+          onClick={onOpenConnector}
+          className="inline-flex items-center gap-1.5 bg-[#111111] hover:bg-white/10 border border-white/[0.06] rounded-full px-3 py-1 text-xs text-gray-400 font-mono transition-colors cursor-pointer"
         >
           <span
-            className={`w-2 h-2 rounded-full ${
-              acc.terminal_connected ? "bg-emerald-400 shadow-[0_0_8px_#10b981]" : "bg-amber-400"
+            className={`w-1.5 h-1.5 rounded-full ${
+              connected
+                ? "bg-green-400 shadow-[0_0_6px_rgba(34,197,94,0.5)]"
+                : "bg-yellow-400"
             }`}
           />
-          <span className="font-mono text-[11px]">{brokerShort} #{acc.account_id}</span>
-          <ChevronDown className="w-3 h-3 text-slate-400" />
-        </button>
-
-        <button
-          type="button"
-          onClick={handleExit}
-          title="Exit to Gate"
-          className="p-1.5 rounded-full bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white transition-colors cursor-pointer"
-        >
-          <LogOut className="w-3.5 h-3.5" />
+          {brokerShort} #{telemetry.account_id}
+          <ChevronDown className="w-3 h-3 text-gray-500" />
         </button>
       </div>
     </header>

@@ -9,40 +9,36 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        background: "#07090e",
-        surface: "#0d121c",
-        card: "rgba(16, 23, 37, 0.85)",
-        cardHover: "rgba(22, 32, 51, 0.95)",
-        borderSubtle: "rgba(255, 255, 255, 0.08)",
-        borderActive: "rgba(56, 189, 248, 0.35)",
-        borderEmerald: "rgba(16, 185, 129, 0.45)",
-        emeraldCustom: {
-          DEFAULT: "#10b981",
-          light: "#34d399",
-          glow: "rgba(16, 185, 129, 0.35)",
+        background: "#000000",
+        surface: "#111111",
+        surfaceHover: "#1A1A1A",
+        borderSubtle: "rgba(255, 255, 255, 0.06)",
+        borderHover: "rgba(255, 255, 255, 0.10)",
+        accent: {
+          DEFAULT: "#22C55E",
+          light: "#4ADE80",
+          glow: "rgba(34, 197, 94, 0.15)",
+          muted: "rgba(34, 197, 94, 0.10)",
         },
-        cyanCustom: {
-          DEFAULT: "#38bdf8",
-          glow: "rgba(56, 189, 248, 0.25)",
-        },
-        roseCustom: {
-          DEFAULT: "#f43f5e",
-          glow: "rgba(244, 63, 94, 0.25)",
-        },
-        goldCustom: {
-          DEFAULT: "#f59e0b",
-          glow: "rgba(245, 158, 11, 0.25)",
+        loss: {
+          DEFAULT: "#EF4444",
+          glow: "rgba(239, 68, 68, 0.15)",
+          muted: "rgba(239, 68, 68, 0.10)",
         },
       },
       fontFamily: {
-        sans: ["var(--font-sans)", "Plus Jakarta Sans", "-apple-system", "sans-serif"],
-        mono: ["var(--font-mono)", "JetBrains Mono", "monospace"],
+        sans: ["var(--font-sans)", "Inter", "-apple-system", "SF Pro Display", "sans-serif"],
+        mono: ["var(--font-mono)", "JetBrains Mono", "SF Mono", "monospace"],
       },
       keyframes: {
-        pulseGlow: {
-          "0%": { boxShadow: "0 0 0 0 rgba(16, 185, 129, 0.5)" },
-          "70%": { boxShadow: "0 0 0 16px rgba(16, 185, 129, 0)" },
-          "100%": { boxShadow: "0 0 0 0 rgba(16, 185, 129, 0)" },
+        fadeUp: {
+          "0%": { opacity: "0", transform: "translateY(12px)" },
+          "100%": { opacity: "1", transform: "translateY(0)" },
+        },
+        livePulse: {
+          "0%": { boxShadow: "0 0 0 0 rgba(34, 197, 94, 0.5)" },
+          "70%": { boxShadow: "0 0 0 10px rgba(34, 197, 94, 0)" },
+          "100%": { boxShadow: "0 0 0 0 rgba(34, 197, 94, 0)" },
         },
         radarExpand: {
           "0%": { transform: "scale(0.2)", opacity: "0.8" },
@@ -50,7 +46,8 @@ const config: Config = {
         },
       },
       animation: {
-        pulseGlow: "pulseGlow 2.5s infinite",
+        fadeUp: "fadeUp 0.4s ease-out forwards",
+        livePulse: "livePulse 2s infinite",
         radarExpand: "radarExpand 2.5s infinite linear",
       },
     },

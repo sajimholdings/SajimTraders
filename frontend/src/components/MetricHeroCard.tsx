@@ -1,76 +1,85 @@
 "use client";
 
 import React from "react";
-import { TrendingUp } from "lucide-react";
+import { TrendingUp, TrendingDown } from "lucide-react";
 import { AccountTelemetry } from "../lib/types";
 
 interface MetricHeroCardProps {
-  account?: AccountTelemetry;
-  telemetry?: AccountTelemetry;
+  telemetry: AccountTelemetry;
 }
 
-export const MetricHeroCard: React.FC<MetricHeroCardProps> = ({ account, telemetry }) => {
-  const acc = account || telemetry || {
-    balance: 20.98,
-    currency: "USD",
-    today_pnl: 4.35,
-    today_pnl_percent: 20.7,
-    equity: 25.33,
-    free_margin: 24.10,
-  } as AccountTelemetry;
+export const MetricHeroCard: React.FC<MetricHeroCardProps> = ({ telemetry }) => {
+  const equity = telemetry.equity ?? 0;
+  const pnl = telemetry.today_pnl ?? 0;
+  const pnlPercent = telemetry.today_pnl_percent ?? 0;
+  const freeMargin = telemetry.free_margin ?? 0;
+  const isPositive = pnl >= 0;
 
-  const isPositive = (acc.today_pnl || 0) >= 0;
+  const formatCurrency = (value: number): string => {
+    const abs = Math.abs(value);
+    if (abs >= 1_000_000) return `$${(abs / 1_000_000).toFixed(2)}M`;
+    if (abs >= 10_000) return `$${abs.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    return `$${abs.toFixed(2)}`;
+  };
 
   return (
-    <section className="bg-[#0d121c] border border-white/10 rounded-2xl p-5 shadow-lg relative overflow-hidden">
-      {/* Subtle top glow */}
-      <div className="absolute -top-12 left-1/2 -translate-x-1/2 w-48 h-20 bg-emerald-500/10 rounded-full blur-xl pointer-events-none" />
+    <section className="pt-2 pb-1">
+      {/* Demo badge */}
+      {telemetry.is_demo && (
+        <span className="inline-block mb-3 bg-amber-500/10 text-amber-400 border border-amber-500/20 rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider">
+          Demo Mode
+        </span>
+      )}
 
-      <div className="flex justify-between items-end mb-4 relative z-10">
-        <div>
-          <span className="block text-[11px] font-extrabold tracking-wider text-slate-400 mb-1">
-            ACCOUNT BALANCE
-          </span>
-          <div className="flex items-baseline gap-1.5 font-mono">
-            <span className="text-3xl sm:text-4xl font-black text-white tracking-tight">
-              ${(acc.balance || 0).toFixed(2)}
-            </span>
-            <span className="text-xs font-bold text-slate-400">{acc.currency || "USD"}</span>
-          </div>
-        </div>
+      {/* Label */}
+      <p className="text-xs text-gray-500 font-medium uppercase tracking-wider mb-1.5">
+        Portfolio value
+      </p>
 
-        {/* Today's Net Profit Pill */}
-        <div className="flex flex-col items-end bg-emerald-500/10 border border-emerald-500/30 px-3.5 py-2 rounded-xl">
-          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">
-            Today&apos;s Net Profit
-          </span>
-          <div className="flex items-center gap-1 text-emerald-400 font-mono font-black text-base leading-none">
-            <TrendingUp className="w-3.5 h-3.5" />
-            <span>
-              {isPositive ? "+" : ""}${(acc.today_pnl || 0).toFixed(2)}
-            </span>
-          </div>
-          <span className="text-[10px] font-bold text-emerald-300 font-mono mt-0.5">
-            🟢 {isPositive ? "+" : ""}{(acc.today_pnl_percent || 0).toFixed(1)}%
-          </span>
-        </div>
+      {/* Main balance */}
+      <h1 className="text-[42px] sm:text-5xl font-bold text-white tracking-tight font-mono leading-none">
+        {pnl < 0 && equity < 0 ? "-" : ""}
+        {formatCurrency(equity)}
+      </h1>
+
+      {/* P&L pill */}
+      <div className="mt-3">
+        <span
+          className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold border ${
+            isPositive
+              ? "bg-green-500/10 text-green-400 border-green-500/20"
+              : "bg-red-500/10 text-red-400 border-red-500/20"
+          }`}
+        >
+          {isPositive ? (
+            <TrendingUp className="w-3 h-3" />
+          ) : (
+            <TrendingDown className="w-3 h-3" />
+          )}
+          {isPositive ? "▲" : "▼"}{" "}
+          {isPositive ? "+" : "-"}
+          {formatCurrency(pnl)} ({isPositive ? "+" : "-"}
+          {Math.abs(pnlPercent).toFixed(1)}%)
+        </span>
       </div>
 
-      {/* Secondary Telemetry Strip */}
-      <div className="pt-3 border-t border-white/5 flex items-center justify-between text-xs text-slate-400">
+      {/* Bottom metrics row */}
+      <div className="flex gap-6 mt-5 text-xs">
         <div>
-          <span>Equity: </span>
-          <strong className="text-white font-mono">${(acc.equity || 0).toFixed(2)}</strong>
+          <span className="block text-gray-500 mb-0.5">Equity</span>
+          <span className="text-white font-mono font-medium">
+            ${equity.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          </span>
         </div>
-        <span className="text-white/10">•</span>
         <div>
-          <span>Free Margin: </span>
-          <strong className="text-white font-mono">${(acc.free_margin || 0).toFixed(2)}</strong>
+          <span className="block text-gray-500 mb-0.5">Free Margin</span>
+          <span className="text-white font-mono font-medium">
+            ${freeMargin.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          </span>
         </div>
-        <span className="text-white/10">•</span>
         <div>
-          <span>Shield: </span>
-          <strong className="text-emerald-400 font-mono">+0.35R BE</strong>
+          <span className="block text-gray-500 mb-0.5">BE Shield</span>
+          <span className="text-green-400 font-mono font-medium">+0.35R</span>
         </div>
       </div>
     </section>
