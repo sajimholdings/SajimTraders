@@ -1,555 +1,569 @@
 /**
  * ========================================================================================
- *              SAJIM TRADERS — QUANTITATIVE WEB PLATFORM & TERMINAL (app.js)
+ *              SAJIM TRADERS — 1-TAP CLIENT PORTAL & COPY ENGINE (app.js)
  * ========================================================================================
  * Chief Quantitative Architect: Jimmy Mathu
  * Brand: Sajim Traders (@sajimtraders)
- * Note: Consumes sanitized institutional signals from BEEP API Gateway.
+ * Features:
+ *   - Live Account Balance & Telemetry Synchronization
+ *   - 1-Tap Direct MT5 Order Execution
+ *   - Hands-Free Auto-Pilot Copy Trading Toggle
+ *   - Real-Time Open Position Management & Close Triggers
  * ========================================================================================
  */
 
-let refreshCountdown = 3;
-let refreshInterval = 3;
-let autoRefreshTimer = null;
-let allSignalsCache = [];
-let activeSignalFilter = "ALL";
+let clientAccount = {
+  account_id: "17537803",
+  account_name: "Jimmy Muema",
+  broker_server: "Headway-Real",
+  autopilot_enabled: false,
+  balance: 20.98,
+  equity: 20.98,
+  free_margin: 20.98,
+  floating_pnl: 0.0,
+  currency: "USD",
+  terminal_connected: true
+};
 
+let cachedSignals = [];
+let activeCategoryFilter = "ALL";
+let pollInterval = null;
+
+// Initialize when DOM is ready
 document.addEventListener("DOMContentLoaded", () => {
-  initTabs();
-  initSammyCheck();
-  initManualRefresh();
-  
-  // Initial fetch
-  fetchLandingStats();
-  fetchTelemetry();
-  fetchPositions();
+  // Initial Loads
+  fetchAccount();
   fetchSignals();
-  fetchEdgeMatrix();
+  fetchActiveTrades();
 
-  // Start polling
-  startAutoRefresh();
+  // 3-second live polling
+  startLivePolling();
 });
 
 // -----------------------------------------------------------------------------
-// VIEW SWITCHING (LANDING OVERVIEW <--> QUANT TERMINAL)
+// LIVE POLLING
 // -----------------------------------------------------------------------------
-window.switchView = function(viewName) {
-  const landingView = document.getElementById("view-landing");
-  const terminalView = document.getElementById("view-terminal");
-  const btnLanding = document.getElementById("btn-view-landing");
-  const btnTerminal = document.getElementById("btn-view-terminal");
+function startLivePolling() {
+  if (pollInterval) clearInterval(pollInterval);
+  pollInterval = setInterval(() => {
+    fetchAccount();
+    fetchSignals();
+    fetchActiveTrades();
+  }, 3000);
+}
 
-  if (viewName === "terminal") {
-    if (landingView) landingView.classList.remove("active");
-    if (terminalView) terminalView.classList.add("active");
-    if (btnLanding) btnLanding.classList.remove("active");
-    if (btnTerminal) btnTerminal.classList.add("active");
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  } else {
-    if (terminalView) terminalView.classList.remove("active");
-    if (landingView) landingView.classList.add("active");
-    if (btnTerminal) btnTerminal.classList.remove("active");
-    if (btnLanding) btnLanding.classList.add("active");
-    window.scrollTo({ top: 0, behavior: "smooth" });
+// -----------------------------------------------------------------------------
+// ACCOUNT TELEMETRY
+// -----------------------------------------------------------------------------
+async function fetchAccount() {
+  try {
+    const res = await fetch("/api/client/account");
+    if (!res.ok) return;
+    const data = await res.json();
+    clientAccount = data;
+
+    // Update Top Hero Card
+    const heroBalance = document.getElementById("hero-balance");
+    if (heroBalance) {
+      heroBalance.innerHTML = `$${data.balance.toFixed(2)} <span class="currency">${data.currency || 'USD'}</span>`;
+    }
+
+    const heroEquity = document.getElementById("hero-equity");
+    if (heroEquity) heroEquity.textContent = `$${data.equity.toFixed(2)}`;
+
+    const heroFreeMargin = document.getElementById("hero-free-margin");
+    if (heroFreeMargin) heroFreeMargin.textContent = `$${data.free_margin.toFixed(2)}`;
+
+    const heroBroker = document.getElementById("hero-broker-server");
+    if (heroBroker) heroBroker.textContent = data.broker_server || "Headway-Real";
+
+    const heroName = document.getElementById("hero-acc-name");
+    if (heroName) heroName.textContent = data.account_name || `#${data.account_id}`;
+
+    // Floating PnL
+    const heroPnl = document.getElementById("hero-floating-pnl");
+    const floatingPnl = data.floating_pnl || 0.0;
+    if (heroPnl) {
+      const sign = floatingPnl > 0 ? "+" : "";
+      heroPnl.textContent = `${sign}$${floatingPnl.toFixed(2)}`;
+      heroPnl.className = "pnl-value " + (floatingPnl > 0 ? "positive" : (floatingPnl < 0 ? "negative" : "zero"));
+    }
+
+    // Active trades count in hero
+    const openCount = (data.open_positions || []).length;
+    const heroCount = document.getElementById("hero-active-count");
+    if (heroCount) heroCount.textContent = `${openCount} / 3 Max`;
+
+    const btnTradesCount = document.getElementById("btn-trades-count");
+    if (btnTradesCount) btnTradesCount.textContent = openCount;
+
+    const badgeTradesCount = document.getElementById("badge-trades-count");
+    if (badgeTradesCount) badgeTradesCount.textContent = openCount;
+
+    // Header Chip
+    const chipText = document.getElementById("chip-acc-text");
+    if (chipText) chipText.textContent = `MT5: #${data.account_id}`;
+
+    const chipDot = document.getElementById("chip-dot");
+    if (chipDot) {
+      chipDot.className = "chip-status-dot " + (data.terminal_connected ? "connected" : "");
+    }
+
+    // Sync Auto-Pilot Toggle State
+    syncAutoPilotUI(data.autopilot_enabled);
+
+  } catch (err) {
+    console.warn("Account polling offline or server restarting:", err);
+  }
+}
+
+// -----------------------------------------------------------------------------
+// AUTOPILOT TOGGLING
+// -----------------------------------------------------------------------------
+window.toggleAutoPilot = async function(enabled) {
+  try {
+    const res = await fetch("/api/client/toggle-autopilot", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        account_id: clientAccount.account_id,
+        enabled: enabled
+      })
+    });
+
+    const data = await res.json();
+    if (data.success) {
+      clientAccount.autopilot_enabled = enabled;
+      syncAutoPilotUI(enabled);
+      const msg = enabled 
+        ? "🤖 Auto-Pilot ACTIVATED! All V2 signals will mirror automatically." 
+        : "⏸️ Auto-Pilot PAUSED. Switched to Manual 1-Tap execution.";
+      showToast(msg);
+    } else {
+      showToast("Failed to update Auto-Pilot: " + (data.error || "Unknown error"));
+    }
+  } catch (err) {
+    console.error("AutoPilot toggle error:", err);
+    showToast("Error communicating with trading server");
   }
 };
 
-// -----------------------------------------------------------------------------
-// LANDING STATS
-// -----------------------------------------------------------------------------
-async function fetchLandingStats() {
-  try {
-    const res = await fetch("/api/landing");
-    if (!res.ok) return;
-    const data = await res.json();
-    // Landing stats are statically rendered with high-converting values,
-    // but dynamic sync can update if needed.
-  } catch (err) {
-    console.warn("Landing stats fallback active.");
+function syncAutoPilotUI(enabled) {
+  // Header Toggle
+  const headerToggle = document.getElementById("header-autopilot-toggle");
+  if (headerToggle && headerToggle.checked !== enabled) {
+    headerToggle.checked = enabled;
+  }
+
+  const headerText = document.getElementById("header-autopilot-text");
+  if (headerText) {
+    headerText.textContent = enabled ? "ON" : "OFF";
+    headerText.className = "autopilot-status-text " + (enabled ? "active" : "");
+  }
+
+  // Main Hub Toggle
+  const mainToggle = document.getElementById("main-autopilot-toggle");
+  if (mainToggle && mainToggle.checked !== enabled) {
+    mainToggle.checked = enabled;
+  }
+
+  const statusBox = document.getElementById("autopilot-status-box");
+  const bannerText = document.getElementById("autopilot-banner-text");
+
+  if (statusBox && bannerText) {
+    if (enabled) {
+      statusBox.className = "status-indicator-box active";
+      bannerText.innerHTML = "<strong>Auto-Pilot is ACTIVE!</strong> 24/7 autonomous copy-trading enabled for account #" + clientAccount.account_id;
+    } else {
+      statusBox.className = "status-indicator-box inactive";
+      bannerText.innerHTML = "Auto-Pilot is currently OFF. You are in manual 1-tap mode.";
+    }
   }
 }
 
 // -----------------------------------------------------------------------------
-// TAB SWITCHING (INSIDE TERMINAL)
-// -----------------------------------------------------------------------------
-function initTabs() {
-  const tabBtns = document.querySelectorAll(".tab-btn");
-  const tabPanels = document.querySelectorAll(".tab-panel");
-
-  tabBtns.forEach(btn => {
-    btn.addEventListener("click", () => {
-      const targetTab = btn.getAttribute("data-tab");
-
-      tabBtns.forEach(b => b.classList.remove("active"));
-      tabPanels.forEach(p => p.classList.remove("active"));
-
-      btn.classList.add("active");
-      const activePanel = document.getElementById(targetTab);
-      if (activePanel) activePanel.classList.add("active");
-    });
-  });
-}
-
-// -----------------------------------------------------------------------------
-// AUTO-REFRESH & POLLING
-// -----------------------------------------------------------------------------
-function startAutoRefresh() {
-  if (autoRefreshTimer) clearInterval(autoRefreshTimer);
-
-  autoRefreshTimer = setInterval(() => {
-    refreshCountdown--;
-    const counterEl = document.getElementById("refresh-counter");
-    if (counterEl) counterEl.textContent = `${refreshCountdown}s`;
-
-    if (refreshCountdown <= 0) {
-      refreshCountdown = refreshInterval;
-      fetchTelemetry();
-      fetchPositions();
-      fetchSignals();
-    }
-  }, 1000);
-}
-
-function initManualRefresh() {
-  const btn = document.getElementById("btn-manual-refresh");
-  if (btn) {
-    btn.addEventListener("click", () => {
-      refreshCountdown = refreshInterval;
-      fetchTelemetry();
-      fetchPositions();
-      fetchSignals();
-      fetchEdgeMatrix();
-      showToast("Telemetry synced with MT5 terminal");
-    });
-  }
-}
-
-// -----------------------------------------------------------------------------
-// TELEMETRY & ACCOUNT METRICS
-// -----------------------------------------------------------------------------
-async function fetchTelemetry() {
-  try {
-    const res = await fetch("/api/status");
-    if (!res.ok) return;
-    const data = await res.json();
-
-    const acc = data.account || {};
-    const pnl = data.pnl || {};
-    const conc = data.concurrency || {};
-    const broker = data.broker || {};
-    const circuit = data.circuit_breaker || {};
-
-    // Top Navigation
-    const brokerEl = document.getElementById("nav-broker-status");
-    if (brokerEl && broker.server) {
-      brokerEl.textContent = `MT5: ${broker.server} (${broker.account})`;
-    }
-
-    const sessionEl = document.getElementById("nav-market-session");
-    if (sessionEl && data.session) {
-      sessionEl.textContent = data.session;
-    }
-
-    const circuitEl = document.getElementById("nav-circuit-breaker");
-    const circuitText = document.getElementById("circuit-text");
-    if (circuitEl && circuitText) {
-      if (circuit.active) {
-        circuitEl.className = "circuit-badge tripped";
-        circuitText.textContent = "CIRCUIT TRIPPED";
-      } else {
-        circuitEl.className = "circuit-badge safe";
-        circuitText.textContent = "CIRCUIT SAFE";
-      }
-    }
-
-    // KPI Cards
-    const balUsc = acc.balance_usc || 0.0;
-    const balUsd = acc.balance_usd || (balUsc / 100.0);
-    const eqUsc = acc.equity_usc || 0.0;
-    const eqUsd = acc.equity_usd || (eqUsc / 100.0);
-
-    const balEl = document.getElementById("kpi-balance");
-    if (balEl) balEl.textContent = `${balUsc.toFixed(2)} USC`;
-
-    const balUsdEl = document.getElementById("kpi-balance-usd");
-    if (balUsdEl) balUsdEl.textContent = `$${balUsd.toFixed(2)} USD (Cent Account)`;
-
-    const eqEl = document.getElementById("kpi-equity");
-    if (eqEl) eqEl.textContent = `${eqUsc.toFixed(2)} USC`;
-
-    const eqUsdEl = document.getElementById("kpi-equity-usd");
-    if (eqUsdEl) eqUsdEl.textContent = `$${eqUsd.toFixed(2)} USD`;
-
-    // Floating PnL
-    const floatPnl = pnl.today_floating || 0.0;
-    const floatEl = document.getElementById("kpi-floating-pnl");
-    if (floatEl) {
-      const prefix = floatPnl >= 0 ? "+" : "";
-      floatEl.textContent = `${prefix}${floatPnl.toFixed(2)} USC`;
-      floatEl.className = `kpi-value ${floatPnl >= 0 ? "profit-green" : "loss-red"}`;
-    }
-
-    const closedPnl = pnl.today_closed || 0.0;
-    const closedEl = document.getElementById("kpi-closed-pnl");
-    if (closedEl) {
-      closedEl.textContent = `Today's Closed PnL: ${closedPnl >= 0 ? "+" : ""}${closedPnl.toFixed(2)} USC`;
-    }
-
-    // Free Margin & Level
-    const freeMargin = acc.free_margin || 0.0;
-    const freeMarginEl = document.getElementById("kpi-free-margin");
-    if (freeMarginEl) freeMarginEl.textContent = `${freeMargin.toFixed(2)} USC`;
-
-    const marginLvl = acc.margin_level_pct || 0.0;
-    const marginLvlEl = document.getElementById("kpi-margin-level");
-    if (marginLvlEl) marginLvlEl.textContent = `Margin Level: ${marginLvl.toFixed(1)}%`;
-
-    // Concurrency
-    const totalOpen = conc.total_open || 0;
-    const maxCombined = conc.max_combined || 12;
-    const concEl = document.getElementById("kpi-concurrency");
-    if (concEl) concEl.textContent = `${totalOpen} / ${maxCombined}`;
-
-    const progressEl = document.getElementById("concurrency-progress");
-    if (progressEl) {
-      const pct = Math.min(100, Math.round((totalOpen / maxCombined) * 100));
-      progressEl.style.width = `${pct}%`;
-    }
-
-    const breakdownEl = document.getElementById("kpi-bot-breakdown");
-    if (breakdownEl) {
-      breakdownEl.textContent = `V1: ${conc.v1_count || 0} | V2: ${conc.v2_count || 0}`;
-    }
-
-    const tabBadge = document.getElementById("tab-positions-badge");
-    if (tabBadge) tabBadge.textContent = totalOpen;
-
-  } catch (err) {
-    console.error("Error fetching telemetry:", err);
-  }
-}
-
-// -----------------------------------------------------------------------------
-// ACTIVE POSITIONS
-// -----------------------------------------------------------------------------
-async function fetchPositions() {
-  try {
-    const res = await fetch("/api/positions");
-    if (!res.ok) return;
-    const data = await res.json();
-
-    const tbody = document.getElementById("positions-table-body");
-    if (!tbody) return;
-
-    const trades = data.trades || [];
-    if (trades.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="10" style="text-align: center; color: var(--text-muted); padding: 2rem;">No open positions currently held.</td></tr>`;
-      return;
-    }
-
-    let rowsHtml = "";
-    trades.forEach(t => {
-      const pnl = t.profit || 0.0;
-      const pnlClass = pnl >= 0 ? "profit-green" : "loss-red";
-      const pnlSign = pnl >= 0 ? "+" : "";
-      const typeBadge = t.type === "BUY" ? "badge-buy" : "badge-sell";
-
-      rowsHtml += `
-        <tr>
-          <td><span style="font-family: var(--font-mono); color: var(--text-muted);">${t.ticket}</span></td>
-          <td><strong>${t.symbol}</strong></td>
-          <td>
-            <span class="badge" style="background: rgba(56, 189, 248, 0.1); color: var(--cyan-glow);">${t.bot}</span>
-          </td>
-          <td><span class="badge ${typeBadge}">${t.type}</span></td>
-          <td>${t.volume}</td>
-          <td>${t.price_open}</td>
-          <td style="color: #fb7185;">${t.sl || "--"}</td>
-          <td style="color: #34d399;">${t.tp || "--"}</td>
-          <td class="${pnlClass}" style="font-weight: 700;">${pnlSign}${pnl.toFixed(2)}</td>
-          <td><span class="badge badge-rare">${t.comment || "Sajim_Edge"}</span></td>
-        </tr>
-      `;
-    });
-
-    tbody.innerHTML = rowsHtml;
-  } catch (err) {
-    console.error("Error fetching positions:", err);
-  }
-}
-
-// -----------------------------------------------------------------------------
-// BEEP SIGNALS RADAR & FILTERING
+// SIGNALS FEED & 1-TAP EXECUTION
 // -----------------------------------------------------------------------------
 async function fetchSignals() {
   try {
-    const res = await fetch("/api/signals");
+    const res = await fetch("/api/client/signals");
     if (!res.ok) return;
     const data = await res.json();
+    cachedSignals = data.signals || [];
 
-    allSignalsCache = data.signals || [];
-    renderFilteredSignals();
+    const badgeCount = document.getElementById("badge-signal-count");
+    if (badgeCount) badgeCount.textContent = cachedSignals.length;
+
+    renderSignals();
   } catch (err) {
-    console.error("Error fetching signals:", err);
+    console.warn("Signals fetch error:", err);
   }
 }
 
-window.filterSignals = function(tier) {
-  activeSignalFilter = tier;
-  const chipBtns = document.querySelectorAll(".chip-btn");
-  chipBtns.forEach(btn => {
-    btn.classList.remove("active");
-    if (btn.textContent.includes(tier) || (tier === "ALL" && btn.textContent.includes("All"))) {
-      btn.classList.add("active");
+window.filterSignalsCategory = function(cat) {
+  activeCategoryFilter = cat;
+  const chips = document.querySelectorAll(".filter-chip");
+  chips.forEach(c => {
+    c.classList.remove("active");
+    if (c.textContent.toUpperCase().includes(cat) || (cat === "ALL" && c.textContent.includes("All"))) {
+      c.classList.add("active");
     }
   });
-  renderFilteredSignals();
+  renderSignals();
 };
 
-function renderFilteredSignals() {
-  const container = document.getElementById("signals-container");
-  const countEl = document.getElementById("radar-signal-count");
+function renderSignals() {
+  const container = document.getElementById("signals-feed-container");
   if (!container) return;
 
-  const filtered = allSignalsCache.filter(s => {
-    if (activeSignalFilter === "ALL") return true;
-    return (s.layer || "").toUpperCase() === activeSignalFilter.toUpperCase();
+  const filtered = cachedSignals.filter(s => {
+    if (activeCategoryFilter === "ALL") return true;
+    if (activeCategoryFilter === "GOLD") return s.symbol.includes("XAU") || s.symbol.includes("GOLD");
+    if (activeCategoryFilter === "INDICES") return s.symbol.includes("100") || s.symbol.includes("30") || s.symbol.includes("US") || s.symbol.includes("NAS");
+    if (activeCategoryFilter === "FOREX") return !s.symbol.includes("XAU") && !s.symbol.includes("100") && !s.symbol.includes("30");
+    return true;
   });
 
-  if (countEl) countEl.textContent = filtered.length;
-
   if (filtered.length === 0) {
-    container.innerHTML = `<div style="grid-column: 1/-1; text-align: center; color: var(--text-muted); padding: 3rem;">Scanning for institutional ${activeSignalFilter} setups...</div>`;
+    container.innerHTML = `
+      <div class="empty-trades-state">
+        <p>Scanning markets for high-probability ${activeCategoryFilter} setups...</p>
+      </div>
+    `;
     return;
   }
 
-  let cardsHtml = "";
+  let html = "";
   filtered.forEach(s => {
     const isBuy = (s.action || "").toUpperCase() === "BUY";
-    const actionBadge = isBuy ? "badge-buy" : "badge-sell";
-    
-    let layerBadge = "badge-certified";
-    if (s.layer === "DIAMOND") layerBadge = "badge-diamond";
-    else if (s.layer === "RARE") layerBadge = "badge-rare";
+    const actionClass = isBuy ? "buy" : "sell";
+    const actionPill = isBuy ? "🟢 BUY" : "🔴 SELL";
 
-    cardsHtml += `
+    html += `
       <div class="signal-card">
-        <div class="signal-card-head">
-          <div class="signal-pair">${s.symbol} <span style="font-size: 0.8rem; color: var(--text-muted); font-weight: 400;">(${s.timeframe})</span></div>
-          <div style="display: flex; gap: 0.4rem;">
-            <span class="badge ${layerBadge}">${s.layer}</span>
-            <span class="badge ${actionBadge}">${s.action}</span>
+        <div class="sig-card-head">
+          <div class="sig-asset-group">
+            <span class="sig-symbol">${s.symbol}</span>
+            <span class="sig-tf">${s.timeframe}</span>
+          </div>
+          <div class="sig-badges">
+            <span class="badge-win-prob">🎯 ${s.win_probability || '89% Win Rate'}</span>
+            <span class="badge-action-pill ${actionClass}">${actionPill}</span>
           </div>
         </div>
 
-        <div class="signal-metrics">
-          <div class="metric-item">
-            <span class="metric-lbl">ENTRY PRICE</span>
-            <span class="metric-val">${s.entry}</span>
+        <div class="sig-metrics-grid">
+          <div class="sig-metric-box">
+            <span class="sig-m-lbl">Entry Level</span>
+            <span class="sig-m-val">${s.entry}</span>
           </div>
-          <div class="metric-item">
-            <span class="metric-lbl">TARGET (1:${s.rr} R:R)</span>
-            <span class="metric-val" style="color: #34d399;">${s.tp}</span>
+          <div class="sig-metric-box">
+            <span class="sig-m-lbl">Target (TP)</span>
+            <span class="sig-m-val target">${s.tp}</span>
           </div>
-          <div class="metric-item">
-            <span class="metric-lbl">INVALIDATION (SL)</span>
-            <span class="metric-val" style="color: #fb7185;">${s.sl}</span>
-          </div>
-          <div class="metric-item">
-            <span class="metric-lbl">EDGE MASS M(t)</span>
-            <span class="metric-val">${s.m_t}</span>
+          <div class="sig-metric-box">
+            <span class="sig-m-lbl">Stop Loss (SL)</span>
+            <span class="sig-m-val stop">${s.sl}</span>
           </div>
         </div>
 
-        <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.72rem; color: var(--text-muted); font-family: var(--font-mono);">
-          <span>Session: ${s.session || "LONDON"}</span>
-          <span>Spread: ${s.spread_points || 15} pts</span>
+        <div class="sig-payoff-strip">
+          <div class="payoff-item">
+            <span>Target Gain:</span>
+            <span class="payoff-gain">${s.gain_estimate_usd || '+$12.50'}</span>
+          </div>
+          <div class="payoff-item">
+            <span>Max Risk:</span>
+            <span class="payoff-risk">${s.risk_estimate_usd || '-$4.20'}</span>
+          </div>
+          <div class="payoff-item">
+            <span>Reward:</span>
+            <span class="payoff-rr">${s.rr || '1:2.5'}</span>
+          </div>
         </div>
 
-        <div class="signal-actions">
-          <button class="btn btn-outline" style="flex: 1;" onclick='copySignal(${JSON.stringify(s)})'>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
-            Copy Signal
-          </button>
-          <button class="btn btn-primary" onclick='dispatchSimulatedTrade(${JSON.stringify(s)})'>
-            Verify Risk
-          </button>
-        </div>
+        <button 
+          class="btn-1tap-execute ${actionClass}" 
+          id="btn-exec-${s.id}" 
+          onclick='handle1TapExecute(${JSON.stringify(s)})'>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+          </svg>
+          ⚡ 1-TAP EXECUTE ON MT5 (${actionPill})
+        </button>
       </div>
     `;
   });
 
-  container.innerHTML = cardsHtml;
+  container.innerHTML = html;
 }
 
 // -----------------------------------------------------------------------------
-// EMPIRICAL EDGE MATRIX
+// 1-TAP EXECUTE ACTION
 // -----------------------------------------------------------------------------
-async function fetchEdgeMatrix() {
-  try {
-    const res = await fetch("/api/edge-matrix");
-    if (!res.ok) return;
-    const data = await res.json();
+window.handle1TapExecute = async function(sig) {
+  const btn = document.getElementById(`btn-exec-${sig.id}`);
+  const originalText = btn ? btn.innerHTML : "";
 
-    const tbody = document.getElementById("top-edges-body");
-    const bleedersList = document.getElementById("toxic-bleeders-list");
-
-    if (tbody && data.top_edges) {
-      let rows = "";
-      data.top_edges.forEach(e => {
-        const symbol = e.symbol || "";
-        const tf = e.timeframe || e.tf || "";
-        const pf = (e.profit_factor || e.pf || 0).toFixed(2);
-        const wr = (e.win_rate_pct || e.wr || 0).toFixed(1);
-        const exp = (e.expectancy_r || e.expectancy || 0).toFixed(3);
-
-        rows += `
-          <tr>
-            <td><strong>${symbol}</strong></td>
-            <td><span class="badge" style="background: rgba(255,255,255,0.05); color: #cbd5e1;">${tf}</span></td>
-            <td style="color: #38bdf8; font-weight: 700;">${pf}</td>
-            <td style="color: #34d399;">${wr}%</td>
-            <td>+${exp}R</td>
-          </tr>
-        `;
-      });
-      tbody.innerHTML = rows;
-    }
-
-    if (bleedersList && data.toxic_bleeders && data.toxic_bleeders.worst_assets) {
-      let items = "";
-      data.toxic_bleeders.worst_assets.forEach(b => {
-        items += `<div>• <span style="color: #fb7185;">${b}</span></div>`;
-      });
-      bleedersList.innerHTML = items;
-    }
-  } catch (err) {
-    console.error("Error fetching edge matrix:", err);
+  if (btn) {
+    btn.disabled = true;
+    btn.className = "btn-1tap-execute executing";
+    btn.innerHTML = `<div class="spinner" style="width: 20px; height: 20px; margin: 0;"></div> Submitting order to MT5...`;
   }
-}
 
-// -----------------------------------------------------------------------------
-// SAMMY'S 4-CHECK RISK GATEKEEPER
-// -----------------------------------------------------------------------------
-function initSammyCheck() {
-  const btn = document.getElementById("btn-run-sammy-check");
-  if (!btn) return;
-
-  btn.addEventListener("click", async () => {
+  try {
     const payload = {
-      symbol: document.getElementById("sammy-symbol").value,
-      direction: document.getElementById("sammy-direction").value,
-      current_price: parseFloat(document.getElementById("sammy-price").value) || 0,
-      b_t: parseFloat(document.getElementById("sammy-bt").value) || 0,
-      sl: parseFloat(document.getElementById("sammy-sl").value) || 0,
-      lot_size: parseFloat(document.getElementById("sammy-lot").value) || 0.10,
-      m_t: parseFloat(document.getElementById("sammy-mt").value) || 40.0,
-      lambda_pct: parseFloat(document.getElementById("sammy-lambda").value) || 15.0,
+      account_id: clientAccount.account_id,
+      symbol: sig.symbol,
+      action: sig.action,
+      volume: 0.01,
+      sl: sig.sl,
+      tp: sig.tp,
+      comment: "Sajim_1Tap"
     };
 
-    try {
-      const res = await fetch("/api/sammy-check", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-      });
+    const res = await fetch("/api/client/execute", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
 
-      if (!res.ok) return;
-      const data = await res.json();
-      renderSammyResult(data);
-      showToast(`Sammy's 4-Check Decision: ${data.decision}`);
-    } catch (err) {
-      console.error("Error evaluating Sammy 4-Check:", err);
-    }
-  });
-}
+    const data = await res.json();
 
-function renderSammyResult(data) {
-  const verdictBanner = document.getElementById("sammy-verdict-banner");
-  const timestampEl = document.getElementById("sammy-card-timestamp");
-  const summaryEl = document.getElementById("sammy-summary-text");
+    if (res.ok && data.success) {
+      if (btn) {
+        btn.className = "btn-1tap-execute success";
+        btn.innerHTML = `✓ PLACED ORDER ON MT5 (Ticket #${data.ticket})`;
+      }
+      showToast(`⚡ TRADE EXECUTED! #${data.ticket}: ${sig.action} 0.01 ${sig.symbol}`);
 
-  if (timestampEl) timestampEl.textContent = data.timestamp || "";
-  if (summaryEl) summaryEl.textContent = data.summary || "";
+      // Refresh account and trades
+      fetchAccount();
+      fetchActiveTrades();
 
-  if (verdictBanner) {
-    if (data.decision === "GO") {
-      verdictBanner.className = "sammy-verdict-box verdict-go";
-      verdictBanner.textContent = ">>> GO — APPROVED FOR EXECUTION <<<";
+      // Reset button after 3 seconds
+      setTimeout(() => {
+        if (btn) {
+          btn.disabled = false;
+          btn.className = `btn-1tap-execute ${sig.action.toLowerCase()}`;
+          btn.innerHTML = originalText;
+        }
+      }, 3000);
+
     } else {
-      verdictBanner.className = "sammy-verdict-box verdict-stop";
-      verdictBanner.textContent = "!!! STOP — BLOCKED BY RISK GATEKEEPER !!!";
+      if (btn) {
+        btn.disabled = false;
+        btn.className = `btn-1tap-execute ${sig.action.toLowerCase()}`;
+        btn.innerHTML = originalText;
+      }
+      showToast(`Execution Failed: ${data.error || "Broker rejected order"}`);
     }
-  }
 
-  const checks = data.checks || {};
-  updateGateItem("gate-1", checks.check_1_momentum);
-  updateGateItem("gate-2", checks.check_2_sl_baseline);
-  updateGateItem("gate-3", checks.check_3_lot_size);
-  updateGateItem("gate-4", checks.check_4_lambda_energy);
-}
-
-function updateGateItem(prefix, checkData) {
-  if (!checkData) return;
-  const badge = document.getElementById(`${prefix}-badge`);
-  const desc = document.getElementById(`${prefix}-desc`);
-
-  if (badge) {
-    badge.className = checkData.passed ? "gate-badge-pass" : "gate-badge-fail";
-    badge.textContent = checkData.passed ? "[PASS - YES]" : "[FAIL - NO]";
+  } catch (err) {
+    console.error("1-Tap execution error:", err);
+    if (btn) {
+      btn.disabled = false;
+      btn.className = `btn-1tap-execute ${sig.action.toLowerCase()}`;
+      btn.innerHTML = originalText;
+    }
+    showToast("Network error executing trade.");
   }
-  if (desc && checkData.detail) {
-    desc.textContent = checkData.detail;
-  }
-}
+};
 
 // -----------------------------------------------------------------------------
-// HELPER ACTIONS
+// OPEN TRADES MANAGEMENT
 // -----------------------------------------------------------------------------
-window.copySignal = function(sig) {
-  const text = 
-`🏛️ *Signal: ${sig.symbol} (${sig.timeframe})*
-━━━━━━━━━━━━━━━━━━━━━━
-• Action: *${sig.action}* @ \`${sig.entry}\`
-• Invalidation Floor (SL): \`${sig.sl}\`
-• Target Profit (TP): \`${sig.tp}\` (1:${sig.rr} R:R)
-• Layer: ${sig.layer}
-• Edge Mass M(t): \`${sig.m_t}\`
-⚡ *Sajim Traders — Powered by BEEP Protocol*`;
+async function fetchActiveTrades() {
+  try {
+    const res = await fetch("/api/client/active-trades");
+    if (!res.ok) return;
+    const data = await res.json();
+    const trades = data.trades || [];
 
-  navigator.clipboard.writeText(text).then(() => {
-    showToast(`Signal for ${sig.symbol} copied!`);
-  }).catch(() => {
-    showToast("Copied to clipboard!");
+    const container = document.getElementById("open-trades-container");
+    if (!container) return;
+
+    if (trades.length === 0) {
+      container.innerHTML = `
+        <div class="empty-trades-state">
+          <div class="empty-icon">
+            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <circle cx="12" cy="12" r="10"></circle>
+              <line x1="12" y1="8" x2="12" y2="12"></line>
+              <line x1="12" y1="16" x2="12.01" y2="16"></line>
+            </svg>
+          </div>
+          <h3>No Open Positions</h3>
+          <p>You have no active orders executing on your MT5 terminal right now. Tap a signal from the feed or turn on Auto-Pilot to mirror trades automatically.</p>
+          <button class="btn-primary" onclick="switchNavTab('signals-tab')">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+            Explore 1-Tap Signals
+          </button>
+        </div>
+      `;
+      return;
+    }
+
+    let listHtml = `<div class="trades-list">`;
+    trades.forEach(t => {
+      const pnl = t.pnl || 0.0;
+      const pnlSign = pnl >= 0 ? "+" : "";
+      const pnlClass = pnl >= 0 ? "positive" : "negative";
+
+      listHtml += `
+        <div class="trade-item-card">
+          <div class="trade-item-left">
+            <div>
+              <div class="trade-ticket">Ticket #${t.ticket} &bull; ${t.time || ''}</div>
+              <div class="trade-item-symbol">${t.symbol} <span class="badge-action-pill ${t.type.toLowerCase()}" style="font-size: 0.68rem; padding: 0.15rem 0.45rem;">${t.type}</span></div>
+              <div class="trade-item-volume">${t.volume} Lots @ ${t.open_price} &rarr; Now ${t.current_price}</div>
+            </div>
+          </div>
+          <div style="display: flex; align-items: center; gap: 1rem;">
+            <div class="trade-item-pnl ${pnlClass}">${pnlSign}$${pnl.toFixed(2)}</div>
+            <button class="btn-close-trade" onclick="handleCloseTrade(${t.ticket})">
+              ✕ Close
+            </button>
+          </div>
+        </div>
+      `;
+    });
+    listHtml += `</div>`;
+
+    container.innerHTML = listHtml;
+
+  } catch (err) {
+    console.warn("Error loading trades:", err);
+  }
+}
+
+window.handleCloseTrade = async function(ticket) {
+  if (!confirm(`Are you sure you want to close position #${ticket} at market price?`)) {
+    return;
+  }
+
+  try {
+    const res = await fetch("/api/client/close-trade", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ticket: ticket })
+    });
+
+    const data = await res.json();
+    if (res.ok && data.success) {
+      showToast(`Position #${ticket} successfully closed!`);
+      fetchAccount();
+      fetchActiveTrades();
+    } else {
+      showToast(`Failed to close: ${data.error || "Error"}`);
+    }
+  } catch (err) {
+    showToast("Error communicating with broker to close position.");
+  }
+};
+
+// -----------------------------------------------------------------------------
+// TAB SWITCHING
+// -----------------------------------------------------------------------------
+window.switchNavTab = function(tabId) {
+  const tabs = document.querySelectorAll(".tab-content");
+  const navBtns = document.querySelectorAll(".nav-tab");
+
+  tabs.forEach(t => t.classList.remove("active"));
+  navBtns.forEach(b => b.classList.remove("active"));
+
+  const targetTab = document.getElementById(tabId);
+  if (targetTab) targetTab.classList.add("active");
+
+  const activeBtn = document.querySelector(`[onclick="switchNavTab('${tabId}')"]`);
+  if (activeBtn) activeBtn.classList.add("active");
+
+  window.scrollTo({ top: 0, behavior: "smooth" });
+};
+
+// -----------------------------------------------------------------------------
+// CONNECT MT5 MODAL
+// -----------------------------------------------------------------------------
+window.openConnectModal = function() {
+  const modal = document.getElementById("connect-modal");
+  if (modal) modal.classList.add("active");
+};
+
+window.closeConnectModal = function() {
+  const modal = document.getElementById("connect-modal");
+  if (modal) modal.classList.remove("active");
+};
+
+window.handleAccountConnect = async function(e) {
+  e.preventDefault();
+  const broker = document.getElementById("modal-broker-server").value;
+  const login = document.getElementById("modal-login").value;
+  const password = document.getElementById("modal-password").value;
+  const riskMode = document.getElementById("modal-risk-mode").value;
+
+  const payload = {
+    account_id: login,
+    broker_server: broker,
+    risk_mode: riskMode,
+    account_name: `Account #${login}`
+  };
+
+  try {
+    const res = await fetch("/api/client/connect", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+
+    const data = await res.json();
+    if (data.success) {
+      showToast(`Connected successfully to MT5 #${login}!`);
+      closeConnectModal();
+      fetchAccount();
+    } else {
+      showToast("Connect failed: " + (data.error || "Unknown"));
+    }
+  } catch (err) {
+    showToast("Error connecting account");
+  }
+};
+
+// -----------------------------------------------------------------------------
+// RISK MODE UPDATE
+// -----------------------------------------------------------------------------
+window.updateRiskMode = async function(mode) {
+  const cards = document.querySelectorAll(".risk-preset-card");
+  cards.forEach(c => {
+    c.classList.remove("active");
+    if (c.querySelector(`input[value="${mode}"]`)) {
+      c.classList.add("active");
+    }
   });
+
+  try {
+    await fetch("/api/client/connect", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        account_id: clientAccount.account_id,
+        risk_mode: mode
+      })
+    });
+    showToast(`Risk profile updated to ${mode}`);
+  } catch (err) {
+    console.warn("Could not save risk mode:", err);
+  }
 };
 
-window.dispatchSimulatedTrade = function(sig) {
-  // Ensure terminal view is active
-  switchView('terminal');
-
-  // Switch to Sammy tab and auto-populate parameters
-  const sammyTabBtn = document.querySelector('[data-tab="tab-sammy"]');
-  if (sammyTabBtn) sammyTabBtn.click();
-
-  document.getElementById("sammy-symbol").value = sig.symbol;
-  document.getElementById("sammy-direction").value = sig.action;
-  document.getElementById("sammy-price").value = sig.entry;
-  document.getElementById("sammy-bt").value = sig.b_t || sig.entry;
-  document.getElementById("sammy-sl").value = sig.sl;
-  document.getElementById("sammy-mt").value = sig.m_t || 45.0;
-
-  // Run check automatically
-  const checkBtn = document.getElementById("btn-run-sammy-check");
-  if (checkBtn) checkBtn.click();
-};
-
-function showToast(message) {
-  const toast = document.getElementById("toast-msg");
+// -----------------------------------------------------------------------------
+// TOAST NOTIFICATION
+// -----------------------------------------------------------------------------
+function showToast(msg) {
+  const toast = document.getElementById("app-toast");
   if (!toast) return;
-  toast.textContent = message;
+  toast.textContent = msg;
   toast.style.display = "block";
   setTimeout(() => {
     toast.style.display = "none";
-  }, 2500);
+  }, 3500);
 }
