@@ -17,7 +17,8 @@ overnight_execution.log
 
 # Environment variables & Private Keys
 .env
-.env.local
+.env*
+**/.env*
 *.pem
 *.key
 

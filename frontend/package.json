@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "next build && node -e \"const fs=require('fs'); fs.mkdirSync('web/static', {recursive:true}); fs.cpSync('.next', 'web/static', {recursive:true}); console.log('Mirrored .next to web/static successfully');\"",
     "start": "next start",
     "lint": "next lint"
   },
