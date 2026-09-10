@@ -484,3 +484,9 @@ class MultiAccountManager:
 
 # Global Singleton
 account_manager = MultiAccountManager()
+
+
+def get_multi_account_manager() -> MultiAccountManager:
+    """Returns the singleton instance of MultiAccountManager."""
+    return account_manager
+

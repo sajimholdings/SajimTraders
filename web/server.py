@@ -35,8 +35,32 @@ class SajimTradersHandler(SimpleHTTPRequestHandler, ClientRoutesMixin, AdminRout
     Inherits modular route mixins for clean single-responsibility design.
     """
 
+    extensions_map = {
+        **SimpleHTTPRequestHandler.extensions_map,
+        ".js": "application/javascript",
+        ".mjs": "application/javascript",
+        ".css": "text/css",
+        ".json": "application/json",
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".svg": "image/svg+xml",
+        ".ico": "image/x-icon",
+        ".woff": "font/woff",
+        ".woff2": "font/woff2",
+        ".ttf": "font/ttf",
+    }
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=STATIC_DIR, **kwargs)
+
+    def end_headers(self):
+        if self.path.endswith(".html") or self.path in ["/", ""]:
+            self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+            self.send_header("Pragma", "no-cache")
+            self.send_header("Expires", "0")
+        elif "/_next/static/" in self.path:
+            self.send_header("Cache-Control", "public, max-age=31536000, immutable")
+        super().end_headers()
 
     def log_message(self, format, *args):
         # Suppress routine static asset polling logs to keep terminal fast and clean
@@ -92,8 +116,13 @@ class SajimTradersHandler(SimpleHTTPRequestHandler, ClientRoutesMixin, AdminRout
         elif path.startswith("/api/"):
             self._send_json({"error": "Endpoint not found", "path": path}, 404)
         else:
-            if parsed.path in ["", "/"]:
+            req_path = parsed.path
+            if req_path in ["", "/"]:
                 self.path = "/index.html"
+            else:
+                local_file = os.path.join(STATIC_DIR, req_path.lstrip("/\\"))
+                if not os.path.exists(local_file) and not os.path.splitext(req_path)[1]:
+                    self.path = "/index.html"
             super().do_GET()
 
     def do_POST(self):
