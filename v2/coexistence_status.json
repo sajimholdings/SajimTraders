@@ -1,9 +1,9 @@
 {
-  "timestamp": "2026-09-10T13:38:13.736103",
+  "timestamp": "2026-09-10T14:29:20.680966",
   "account": {
-    "balance": 22.6,
-    "equity": 22.6,
-    "free_margin": 22.6,
+    "balance": 19.81,
+    "equity": 19.81,
+    "free_margin": 19.81,
     "margin_level_pct": 9999.0,
     "currency": "USD"
   },
@@ -13,12 +13,12 @@
     "combined_daily_net": -10.52
   },
   "circuit_breaker": {
-    "active": false,
-    "reason": ""
+    "active": true,
+    "reason": "Combined daily net loss (-10.52 USD) >= 50% limit (9.90 USD)"
   },
   "concurrency": {
     "total_open": 0,
-    "max_combined": 12,
+    "max_combined": 3,
     "v1_count": 0,
     "v2_count": 0,
     "other_count": 0

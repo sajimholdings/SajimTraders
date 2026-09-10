@@ -1,0 +1,307 @@
+/* =================================================================== */
+/* FREEMIUM DEMO UPGRADE / HEADWAY CASH MACHINE BANNER                 */
+/* =================================================================== */
+.freemium-upgrade-card {
+  position: relative;
+  background: linear-gradient(135deg, rgba(14, 23, 42, 0.95) 0%, rgba(16, 23, 37, 0.95) 100%);
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  border-radius: var(--radius-lg);
+  padding: 18px;
+  overflow: hidden;
+  box-shadow: 0 8px 24px rgba(245, 158, 11, 0.12);
+}
+
+.upgrade-glass-aura {
+  position: absolute;
+  top: -20px;
+  right: -20px;
+  width: 100px;
+  height: 100px;
+  background: radial-gradient(circle, rgba(245, 158, 11, 0.3) 0%, transparent 70%);
+  pointer-events: none;
+}
+
+.upgrade-content {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.upgrade-icon {
+  font-size: 1.8rem;
+  flex-shrink: 0;
+}
+
+.upgrade-texts h4 {
+  font-size: 0.88rem;
+  font-weight: 800;
+  color: #fff;
+  margin-bottom: 2px;
+}
+
+.upgrade-texts p {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  line-height: 1.3;
+}
+
+.btn-upgrade-partner {
+  flex-shrink: 0;
+  background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+  color: #fff;
+  text-decoration: none;
+  font-size: 0.78rem;
+  font-weight: 800;
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  box-shadow: 0 4px 15px var(--gold-glow);
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.btn-upgrade-partner:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(245, 158, 11, 0.4);
+}
+
+/* =================================================================== */
+/* SCREEN 2: 30-SECOND ACCOUNT CONNECTOR & SWITCHER MODAL              */
+/* =================================================================== */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.75);
+  backdrop-filter: blur(10px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  z-index: 100;
+  animation: fadeIn 0.2s ease;
+}
+
+.connector-modal-card {
+  width: 100%;
+  max-width: 440px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: 24px;
+  box-shadow: 0 25px 60px rgba(0, 0, 0, 0.8);
+  position: relative;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+.modal-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 18px;
+}
+
+.modal-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.modal-logo {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-sm);
+  background: #fff;
+  padding: 2px;
+}
+
+.modal-title-wrap h3 {
+  font-size: 1rem;
+  font-weight: 800;
+}
+
+.btn-modal-close {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 1.2rem;
+  cursor: pointer;
+}
+
+.connector-options-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.opt-tab {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 12px 10px;
+  text-align: center;
+  cursor: pointer;
+  color: var(--text-muted);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  transition: all 0.2s;
+}
+
+.opt-tab.active {
+  background: rgba(16, 185, 129, 0.12);
+  border-color: var(--border-emerald);
+  color: var(--text-main);
+}
+
+.opt-badge {
+  font-size: 0.62rem;
+  font-weight: 800;
+  color: var(--emerald-light);
+}
+
+.opt-badge.real {
+  color: var(--cyan);
+}
+
+.form-group {
+  margin-bottom: 14px;
+  text-align: left;
+}
+
+.form-group label {
+  display: block;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+
+.form-input {
+  width: 100%;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  color: #fff;
+  font-family: var(--font-mono);
+  font-size: 0.88rem;
+  transition: all 0.2s;
+}
+
+.form-input:focus {
+  border-color: var(--cyan);
+  outline: none;
+  box-shadow: 0 0 10px var(--cyan-glow);
+}
+
+.form-partner-callout {
+  background: rgba(56, 189, 248, 0.06);
+  border: 1px dashed rgba(56, 189, 248, 0.3);
+  border-radius: var(--radius-md);
+  padding: 14px;
+  margin: 16px 0;
+  text-align: center;
+}
+
+.callout-tag {
+  font-size: 0.68rem;
+  font-weight: 800;
+  color: var(--cyan);
+}
+
+.form-partner-callout p {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  margin: 4px 0 8px 0;
+}
+
+.partner-apply-btn {
+  display: block;
+  font-size: 0.82rem;
+  font-weight: 800;
+  color: #fff;
+  background: rgba(56, 189, 248, 0.25);
+  border: 1px solid var(--cyan);
+  text-decoration: none;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  margin-bottom: 6px;
+}
+
+.partner-features {
+  font-size: 0.68rem;
+  color: var(--text-dim);
+}
+
+.btn-connect-launch {
+  width: 100%;
+  padding: 14px;
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  border: 1px solid #34d399;
+  color: #fff;
+  font-weight: 800;
+  font-size: 0.92rem;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-connect-launch:hover {
+  box-shadow: 0 6px 20px var(--emerald-glow);
+  transform: translateY(-1px);
+}
+
+/* Toast Notifications */
+.toast-wrap {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.toast {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-emerald);
+  color: #fff;
+  padding: 10px 18px;
+  border-radius: 999px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.7);
+  animation: slideUp 0.25s ease;
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(15px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* Mobile Responsiveness */
+@media (max-width: 480px) {
+  .cockpit-screen {
+    padding: 0 12px 30px 12px;
+  }
+  .cockpit-header {
+    margin: 0 -12px 14px -12px;
+    padding: 10px 12px;
+  }
+  .balance-val {
+    font-size: 1.85rem;
+  }
+  .sig-telemetry-row {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+}

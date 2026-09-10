@@ -1,0 +1,199 @@
+/* =================================================================== */
+/* 1-TAP MANUAL SIGNALS GRID & DURATION / HEALTH TELEMETRY             */
+/* =================================================================== */
+.manual-snipes-section {
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+}
+
+.signals-compact-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.signal-quick-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  transition: all 0.2s ease;
+}
+
+.signal-quick-card:hover {
+  border-color: var(--border-active);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+}
+
+.sig-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.sig-title-box {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sig-symbol {
+  font-size: 1.05rem;
+  font-weight: 800;
+  color: var(--text-main);
+}
+
+.sig-action-pill {
+  font-size: 0.72rem;
+  font-weight: 800;
+  padding: 3px 8px;
+  border-radius: 4px;
+  letter-spacing: 0.04em;
+}
+
+.sig-action-pill.buy {
+  background: rgba(16, 185, 129, 0.15);
+  color: var(--emerald);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.sig-action-pill.sell {
+  background: rgba(244, 63, 94, 0.15);
+  color: var(--rose);
+  border: 1px solid rgba(244, 63, 94, 0.3);
+}
+
+.sig-strat-tag {
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.04);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.sig-prices-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.78rem;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+  background: rgba(0, 0, 0, 0.25);
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+}
+
+.sig-pnl-est {
+  display: flex;
+  gap: 8px;
+  font-size: 0.75rem;
+  font-family: var(--font-mono);
+  font-weight: 700;
+}
+
+.sig-pnl-est .gain { color: var(--emerald); }
+.sig-pnl-est .risk { color: var(--rose); }
+
+/* Duration & Trade Health Telemetry Row */
+.sig-telemetry-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  align-items: center;
+}
+
+.sig-duration-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.74rem;
+  color: var(--cyan);
+  font-weight: 600;
+  background: rgba(6, 182, 212, 0.08);
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(6, 182, 212, 0.2);
+}
+
+.sig-duration-chip .duration-icon {
+  font-size: 0.88rem;
+}
+
+.sig-health-chip {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.7rem;
+  background: rgba(16, 185, 129, 0.06);
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(16, 185, 129, 0.2);
+}
+
+.sig-health-header {
+  display: flex;
+  justify-content: space-between;
+  font-weight: 700;
+  color: var(--emerald);
+}
+
+.sig-health-track {
+  width: 100%;
+  height: 5px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.sig-health-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--emerald) 0%, var(--cyan) 100%);
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+/* Plain-English Trade Explainer */
+.sig-explainer-row {
+  font-size: 0.73rem;
+  color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.02);
+  border-left: 3px solid var(--cyan);
+  padding: 8px 10px;
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  line-height: 1.4;
+}
+
+.sig-explainer-row strong {
+  color: var(--cyan);
+}
+
+/* 1-Tap Order Button */
+.btn-1tap-exec {
+  width: 100%;
+  background: rgba(16, 185, 129, 0.15);
+  border: 1px solid rgba(16, 185, 129, 0.4);
+  color: var(--emerald);
+  font-size: 0.82rem;
+  font-weight: 800;
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.btn-1tap-exec:hover {
+  background: var(--emerald);
+  color: #fff;
+  box-shadow: 0 4px 15px var(--emerald-glow);
+}

@@ -1,9 +1,6 @@
 """
-========================================================================================
-           SAJIM HOLDINGS V2 — PRODUCTION EXECUTION & ORCHESTRATION
-========================================================================================
+SAJIM V2 EXECUTION PACKAGE
 """
-from v2.sajim_v2_dual_bot import SajimV2DualBot
-from v2.dual_orchestrator import SajimDualOrchestrator
+from v2.execution.order_router import V2OrderRouter
 
-__all__ = ["SajimV2DualBot", "SajimDualOrchestrator"]
+__all__ = ["V2OrderRouter"]
