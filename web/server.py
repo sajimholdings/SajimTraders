@@ -99,6 +99,8 @@ class SajimTradersHandler(SimpleHTTPRequestHandler, ClientRoutesMixin, AdminRout
             self.handle_client_signals()
         elif path == "/api/client/active-trades":
             self.handle_client_active_trades()
+        elif path == "/api/client/bridge/orders":
+            self.handle_bridge_orders()
 
         # Institutional / Admin Endpoints
         elif path == "/api/status":
@@ -150,6 +152,10 @@ class SajimTradersHandler(SimpleHTTPRequestHandler, ClientRoutesMixin, AdminRout
             self.handle_client_toggle_autopilot(body)
         elif path == "/api/client/close-trade":
             self.handle_client_close_trade(body)
+        elif path == "/api/client/bridge/sync":
+            self.handle_bridge_sync(body)
+        elif path == "/api/client/bridge/order-result":
+            self.handle_bridge_order_result(body)
         elif path == "/api/client/log":
             self.handle_client_log(body)
 

@@ -443,6 +443,11 @@ export default function Home() {
       const data = await res.json().catch(() => ({}));
 
       if (res.ok && data.success) {
+        if (data.status === "QUEUED_FOR_BRIDGE") {
+          showToast(`⚡ Order queued for MT5 Bridge: ${signal.action} ${signal.symbol}`);
+          return true;
+        }
+
         const newPosition: ClientTrade = {
           ticket: data.ticket || Math.floor(1000000 + Math.random() * 9000000),
           symbol: signal.symbol,
@@ -530,6 +535,26 @@ export default function Home() {
       id: updated.account_id,
       is_demo: updated.is_demo,
     });
+
+    // Immediately fetch fresh live telemetry from backend
+    if (!isDemo && updated.account_id && updated.account_id !== "NEW") {
+      fetch(`/api/client/account?account_id=${updated.account_id}`)
+        .then((r) => r.ok ? r.json() : null)
+        .then((data) => {
+          if (data && (data.account_id === updated.account_id || !data.account_id)) {
+            setTelemetry((prev) => {
+              const fresh = {
+                ...prev,
+                ...data,
+                account_name: prev.account_name || data.account_name,
+              };
+              localStorage.setItem("sajim_active_account", JSON.stringify(fresh));
+              return fresh;
+            });
+          }
+        })
+        .catch(() => {});
+    }
   };
   // Handle Email & Password Auth Success from Supabase
   const handleAuthSuccess = (userData: { email: string; fullName: string; id: string }) => {

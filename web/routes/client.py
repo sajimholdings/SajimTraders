@@ -118,6 +118,41 @@ def get_account_manager():
                 "terminal_connected": True
             }
 
+        def update_account_telemetry(self, account_id, telemetry):
+            acc_id = str(account_id).strip()
+            acc = self.accounts.setdefault(acc_id, {
+                "account_id": acc_id,
+                "account_name": telemetry.get("account_name", f"Account #{acc_id}"),
+                "broker_server": telemetry.get("broker_server", "Headway-Demo"),
+                "status": "ACTIVE"
+            })
+            for k, v in telemetry.items():
+                acc[k] = v
+            acc["last_synced"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            return {"success": True, "account": acc}
+
+        def queue_trade_order(self, order_data):
+            self.orders = getattr(self, "orders", [])
+            order_id = f"ORD_{int(time.time()*1000)}"
+            order = {**order_data, "order_id": order_id, "status": "PENDING"}
+            self.orders.append(order)
+            return {"success": True, "order_id": order_id, "status": "QUEUED"}
+
+        def get_pending_orders(self, account_id=None):
+            orders = getattr(self, "orders", [])
+            if account_id:
+                return [o for o in orders if str(o.get("account_id")) == str(account_id) and o.get("status") == "PENDING"]
+            return [o for o in orders if o.get("status") == "PENDING"]
+
+        def complete_trade_order(self, order_id, result):
+            orders = getattr(self, "orders", [])
+            for o in orders:
+                if o.get("order_id") == order_id:
+                    o["status"] = "COMPLETED" if result.get("success") else "FAILED"
+                    o["ticket"] = result.get("ticket")
+                    return {"success": True, "order": o}
+            return {"success": False, "error": "Order not found"}
+
     account_manager = ResilientAccountManager()
     return account_manager
 
@@ -127,8 +162,11 @@ class ClientRoutesMixin:
 
     def handle_client_account(self):
         """Returns live account balance, equity, and telemetry for the active user."""
+        from urllib.parse import parse_qs, urlparse
+        query_params = parse_qs(urlparse(self.path).query)
+        account_id = query_params.get("account_id", [None])[0]
         mgr = get_account_manager()
-        data = mgr.get_live_account_telemetry()
+        data = mgr.get_live_account_telemetry(account_id=account_id)
         self._send_json(data)
 
     def handle_client_accounts(self):
@@ -296,6 +334,28 @@ class ClientRoutesMixin:
             tp=tp,
             comment=comment
         )
+
+        # If MT5 is not directly installed in this environment (e.g. Linux cloud container),
+        # queue the trade order so the local Windows MT5 bridge can execute it!
+        if not res.get("success") and "not available" in str(res.get("error", "")):
+            if hasattr(mgr, "queue_trade_order"):
+                queue_res = mgr.queue_trade_order({
+                    "account_id": account_id,
+                    "symbol": symbol,
+                    "action": action,
+                    "volume": volume,
+                    "sl": sl,
+                    "tp": tp,
+                    "comment": comment
+                })
+                if queue_res.get("success"):
+                    res = {
+                        "success": True,
+                        "status": "QUEUED_FOR_BRIDGE",
+                        "order_id": queue_res.get("order_id"),
+                        "message": "Order queued for Windows MT5 Terminal Bridge"
+                    }
+
         status_code = 200 if res.get("success") else 400
         self._send_json(res, status_code=status_code)
 
@@ -312,11 +372,40 @@ class ClientRoutesMixin:
         status_code = 200 if res.get("success") else 400
         self._send_json(res, status_code=status_code)
 
+    def handle_bridge_sync(self, body: dict):
+        """Receives live telemetry push from the Windows MT5 bridge."""
+        mgr = get_account_manager()
+        account_id = body.get("account_id")
+        if not account_id:
+            self._send_json({"success": False, "error": "account_id is required"}, 400)
+            return
+        res = mgr.update_account_telemetry(account_id, body)
+        self._send_json(res)
+
+    def handle_bridge_orders(self):
+        """Returns pending orders queued for the Windows MT5 bridge to execute."""
+        from urllib.parse import parse_qs, urlparse
+        query_params = parse_qs(urlparse(self.path).query)
+        account_id = query_params.get("account_id", [None])[0]
+        mgr = get_account_manager()
+        orders = mgr.get_pending_orders(account_id) if hasattr(mgr, "get_pending_orders") else []
+        self._send_json({"count": len(orders), "orders": orders})
+
+    def handle_bridge_order_result(self, body: dict):
+        """Receives trade execution confirmation or failure from the Windows MT5 bridge."""
+        mgr = get_account_manager()
+        order_id = body.get("order_id")
+        if not order_id:
+            self._send_json({"success": False, "error": "order_id is required"}, 400)
+            return
+        res = mgr.complete_trade_order(order_id, body) if hasattr(mgr, "complete_trade_order") else {"success": True}
+        self._send_json(res)
+
     def handle_client_log(self, body: dict):
         """Logs user interactions, clicks, and client events to logs/client_actions.log."""
         event_name = body.get("event", "UNKNOWN_EVENT")
         details = body.get("details", {})
-        timestamp = body.get("timestamp", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         client_ip = self.address_string()
 
         log_line = f"[{timestamp}] [{client_ip}] [EVENT: {event_name}] {json.dumps(details)}\n"

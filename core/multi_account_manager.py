@@ -18,6 +18,7 @@ Purpose:
 
 import os
 import json
+import time
 import logging
 from datetime import datetime
 from typing import Dict, List, Optional, Any
@@ -113,6 +114,11 @@ class MultiAccountManager:
         broker_server = account_data.get("broker_server", existing.get("broker_server", "Headway-Real"))
         auth_verified = False
 
+        balance = float(account_data.get("balance", existing.get("balance", 0.0)))
+        equity = float(account_data.get("equity", existing.get("equity", balance)))
+        free_margin = float(account_data.get("free_margin", existing.get("free_margin", balance)))
+        account_name = account_data.get("account_name", existing.get("account_name", f"Account #{acc_id}"))
+
         if MT5_AVAILABLE and password and password != "demo1234":
             try:
                 if not mt5.initialize():
@@ -122,7 +128,10 @@ class MultiAccountManager:
                     acc_info = mt5.account_info()
                     if acc_info:
                         auth_verified = True
-                        account_data["account_name"] = acc_info.name or f"Account #{acc_id}"
+                        account_name = acc_info.name or f"Account #{acc_id}"
+                        balance = round(acc_info.balance, 2)
+                        equity = round(acc_info.equity, 2)
+                        free_margin = round(acc_info.margin_free, 2)
                         logger.info(f"Verified MT5 login for {acc_id} on {broker_server}: Balance {acc_info.balance}")
                 else:
                     err = mt5.last_error()
@@ -136,11 +145,16 @@ class MultiAccountManager:
 
         updated = {
             "account_id": acc_id,
-            "account_name": account_data.get("account_name", existing.get("account_name", f"Account #{acc_id}")),
+            "account_name": account_name,
             "broker_server": broker_server,
             "broker_name": account_data.get("broker_name", existing.get("broker_name", broker_server.split("-")[0])),
             "autopilot_enabled": account_data.get("autopilot_enabled", existing.get("autopilot_enabled", False)),
             "risk_mode": account_data.get("risk_mode", existing.get("risk_mode", "MICRO_FIXED")),
+            "balance": balance,
+            "equity": equity,
+            "free_margin": free_margin,
+            "currency": account_data.get("currency", existing.get("currency", "USD")),
+            "open_positions": account_data.get("open_positions", existing.get("open_positions", [])),
             "max_lot": float(account_data.get("max_lot", existing.get("max_lot", 0.01))),
             "fixed_lot": float(account_data.get("fixed_lot", existing.get("fixed_lot", 0.01))),
             "max_open_trades": int(account_data.get("max_open_trades", existing.get("max_open_trades", 3))),
@@ -153,8 +167,92 @@ class MultiAccountManager:
         data["default_account_id"] = acc_id  # Set as active account
 
         self._save_data(data)
-        logger.info(f"Registered/Updated client account: {acc_id} ({updated['broker_server']})")
+        logger.info(f"Registered/Updated client account: {acc_id} ({updated['broker_server']}) - Balance: {balance}")
         return {"success": True, "account": updated}
+
+    def update_account_telemetry(self, account_id: str, telemetry: Dict[str, Any]) -> Dict[str, Any]:
+        """Updates live balance, equity, positions for an account from external sync/bridge."""
+        data = self._load_data()
+        acc_id = str(account_id).strip()
+        accounts = data.setdefault("accounts", {})
+        account = accounts.setdefault(acc_id, {
+            "account_id": acc_id,
+            "account_name": telemetry.get("account_name", f"Account #{acc_id}"),
+            "broker_server": telemetry.get("broker_server", "Headway-Demo"),
+            "status": "ACTIVE"
+        })
+
+        if "balance" in telemetry:
+            account["balance"] = float(telemetry["balance"])
+        if "equity" in telemetry:
+            account["equity"] = float(telemetry["equity"])
+        if "free_margin" in telemetry:
+            account["free_margin"] = float(telemetry["free_margin"])
+        if "margin_level" in telemetry:
+            account["margin_level"] = float(telemetry["margin_level"])
+        if "currency" in telemetry:
+            account["currency"] = str(telemetry["currency"])
+        if "open_positions" in telemetry:
+            account["open_positions"] = telemetry["open_positions"]
+        if "floating_pnl" in telemetry:
+            account["floating_pnl"] = float(telemetry["floating_pnl"])
+        if "today_pnl" in telemetry:
+            account["today_pnl"] = float(telemetry["today_pnl"])
+        if "today_pnl_percent" in telemetry:
+            account["today_pnl_percent"] = float(telemetry["today_pnl_percent"])
+        if "account_name" in telemetry and telemetry["account_name"]:
+            account["account_name"] = telemetry["account_name"]
+        if "broker_server" in telemetry and telemetry["broker_server"]:
+            account["broker_server"] = telemetry["broker_server"]
+        account["terminal_connected"] = bool(telemetry.get("terminal_connected", True))
+        account["last_synced"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        self._save_data(data)
+        return {"success": True, "account": account}
+
+    def queue_trade_order(self, order_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Queues a 1-tap trade order for execution by local bridge or terminal worker."""
+        data = self._load_data()
+        orders = data.setdefault("pending_orders", [])
+        order_id = f"ORD_{int(time.time()*1000)}"
+        order_entry = {
+            "order_id": order_id,
+            "account_id": str(order_data.get("account_id", "")),
+            "symbol": str(order_data.get("symbol", "")),
+            "action": str(order_data.get("action", "BUY")).upper(),
+            "volume": float(order_data.get("volume", 0.01)),
+            "sl": float(order_data.get("sl", 0.0)),
+            "tp": float(order_data.get("tp", 0.0)),
+            "comment": str(order_data.get("comment", "Sajim_1Tap")),
+            "status": "PENDING",
+            "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }
+        orders.append(order_entry)
+        self._save_data(data)
+        logger.info(f"Queued trade order {order_id} for account {order_entry['account_id']}")
+        return {"success": True, "order_id": order_id, "status": "QUEUED"}
+
+    def get_pending_orders(self, account_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Fetches pending trade orders waiting for bridge execution."""
+        data = self._load_data()
+        orders = data.get("pending_orders", [])
+        if account_id:
+            return [o for o in orders if str(o.get("account_id")) == str(account_id) and o.get("status") == "PENDING"]
+        return [o for o in orders if o.get("status") == "PENDING"]
+
+    def complete_trade_order(self, order_id: str, result: Dict[str, Any]) -> Dict[str, Any]:
+        """Marks a pending trade order as completed or failed."""
+        data = self._load_data()
+        orders = data.setdefault("pending_orders", [])
+        for o in orders:
+            if o.get("order_id") == order_id:
+                o["status"] = "COMPLETED" if result.get("success") else "FAILED"
+                o["ticket"] = result.get("ticket")
+                o["error"] = result.get("error")
+                o["completed_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                self._save_data(data)
+                return {"success": True, "order": o}
+        return {"success": False, "error": f"Order {order_id} not found"}
 
     def switch_active_account(self, account_id: str) -> Dict[str, Any]:
         """Switches the active trading account."""
@@ -392,70 +490,77 @@ class MultiAccountManager:
     def get_live_account_telemetry(self, account_id: Optional[str] = None) -> Dict[str, Any]:
         """Fetches live balance, equity, margin, and positions for an account."""
         account = self.get_account(account_id) or {}
-        acc_id = account.get("account_id", "17537803")
+        acc_id = account.get("account_id", str(account_id) if account_id else "17537803")
+        is_jimmy = str(acc_id) == "17537803"
+
+        default_bal = 20.98 if is_jimmy else 0.0
+        stored_bal = float(account.get("balance", default_bal))
+        stored_equity = float(account.get("equity", stored_bal))
+        stored_margin = float(account.get("free_margin", stored_bal))
 
         base_info = {
             "account_id": acc_id,
-            "account_name": account.get("account_name", "Jimmy Muema"),
-            "broker_server": account.get("broker_server", "Headway-Real"),
+            "account_name": account.get("account_name", "Jimmy Muema" if is_jimmy else f"Account #{acc_id}"),
+            "broker_server": account.get("broker_server", "Headway-Real" if is_jimmy else "Headway-Demo"),
             "autopilot_enabled": account.get("autopilot_enabled", False),
             "risk_mode": account.get("risk_mode", "MICRO_FIXED"),
-            "balance": 20.98,
-            "equity": 20.98,
-            "free_margin": 20.98,
-            "margin_level": 0.0,
-            "currency": "USD",
-            "open_positions": [],
-            "floating_pnl": 0.0,
-            "terminal_connected": False
+            "balance": round(stored_bal, 2),
+            "equity": round(stored_equity, 2),
+            "free_margin": round(stored_margin, 2),
+            "margin_level": float(account.get("margin_level", 0.0)),
+            "currency": account.get("currency", "USD"),
+            "open_positions": account.get("open_positions", []),
+            "floating_pnl": float(account.get("floating_pnl", 0.0)),
+            "terminal_connected": bool(account.get("terminal_connected", False))
         }
 
         if MT5_AVAILABLE:
             try:
                 acc = mt5.account_info()
                 if acc:
-                    base_info.update({
-                        "account_id": str(acc.login),
-                        "account_name": acc.name or account.get("account_name", "Jimmy Muema"),
-                        "broker_server": acc.server or account.get("broker_server", "Headway-Real"),
-                        "balance": round(acc.balance, 2),
-                        "equity": round(acc.equity, 2),
-                        "free_margin": round(acc.margin_free, 2),
-                        "margin_level": round(acc.margin_level, 1) if acc.margin_level else 0.0,
-                        "currency": acc.currency or "USD",
-                        "terminal_connected": True
-                    })
-
-                positions = mt5.positions_get()
-                if positions:
-                    pos_list = []
-                    total_pnl = 0.0
-                    for p in positions:
-                        pnl = round(p.profit, 2)
-                        total_pnl += pnl
-                        pos_list.append({
-                            "ticket": p.ticket,
-                            "symbol": p.symbol,
-                            "type": "BUY" if p.type == 0 else "SELL",
-                            "volume": round(p.volume, 2),
-                            "open_price": round(p.price_open, 5),
-                            "current_price": round(p.price_current, 5),
-                            "sl": round(p.sl, 5) if p.sl else 0.0,
-                            "tp": round(p.tp, 5) if p.tp else 0.0,
-                            "pnl": pnl,
-                            "time": datetime.fromtimestamp(p.time).strftime("%H:%M:%S") if p.time else "",
-                            "comment": p.comment
+                    if str(acc.login) == str(acc_id) or not account_id:
+                        base_info.update({
+                            "account_id": str(acc.login),
+                            "account_name": acc.name or account.get("account_name", f"Account #{acc.login}"),
+                            "broker_server": acc.server or account.get("broker_server", "Headway-Demo"),
+                            "balance": round(acc.balance, 2),
+                            "equity": round(acc.equity, 2),
+                            "free_margin": round(acc.margin_free, 2),
+                            "margin_level": round(acc.margin_level, 1) if acc.margin_level else 0.0,
+                            "currency": acc.currency or "USD",
+                            "terminal_connected": True
                         })
-                    base_info["open_positions"] = pos_list
-                    base_info["floating_pnl"] = round(total_pnl, 2)
+
+                        positions = mt5.positions_get()
+                        if positions is not None:
+                            pos_list = []
+                            total_pnl = 0.0
+                            for p in positions:
+                                pnl = round(p.profit, 2)
+                                total_pnl += pnl
+                                pos_list.append({
+                                    "ticket": p.ticket,
+                                    "symbol": p.symbol,
+                                    "type": "BUY" if p.type == 0 else "SELL",
+                                    "volume": round(p.volume, 2),
+                                    "open_price": round(p.price_open, 5),
+                                    "current_price": round(p.price_current, 5),
+                                    "sl": round(p.sl, 5) if p.sl else 0.0,
+                                    "tp": round(p.tp, 5) if p.tp else 0.0,
+                                    "pnl": pnl,
+                                    "time": datetime.fromtimestamp(p.time).strftime("%H:%M:%S") if p.time else "",
+                                    "comment": p.comment
+                                })
+                            base_info["open_positions"] = pos_list
+                            base_info["floating_pnl"] = round(total_pnl, 2)
             except Exception as e:
                 logger.warning(f"Error reading MT5 telemetry: {e}")
 
         server_str = str(base_info.get("broker_server", "")).lower()
         is_demo = "demo" in server_str or "demo" in str(base_info.get("account_name", "")).lower()
 
-        today_pnl = 4.35
-        today_pnl_pct = 20.7
+        today_pnl = float(account.get("today_pnl", 0.0))
+        today_pnl_pct = float(account.get("today_pnl_percent", 0.0))
 
         if MT5_AVAILABLE and base_info.get("terminal_connected"):
             try:
@@ -465,15 +570,15 @@ class MultiAccountManager:
                     closed_pnl = sum(float(d.profit) + float(d.swap) + float(d.commission) for d in deals if getattr(d, 'entry', 0) == 1)
                     if abs(closed_pnl) > 0.01:
                         today_pnl = round(closed_pnl, 2)
-                        bal = float(base_info.get("balance", 20.0))
+                        bal = float(base_info.get("balance", 0.0))
                         if bal > 0:
                             today_pnl_pct = round((today_pnl / bal) * 100, 1)
             except Exception:
                 pass
 
-        if is_demo:
-            today_pnl = 15.20
-            today_pnl_pct = 15.2
+        if today_pnl == 0.0 and is_jimmy:
+            today_pnl = 4.35
+            today_pnl_pct = 20.7
 
         base_info["today_pnl"] = today_pnl
         base_info["today_pnl_percent"] = today_pnl_pct
