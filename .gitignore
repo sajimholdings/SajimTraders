@@ -22,11 +22,8 @@ overnight_execution.log
 *.key
 
 # Private Proprietary BEEP Core IP & Quant Engines (Strictly Licensed)
-core/beep_core.py
-core/beep_processor.py
-core/beep_binary_quant_engine.py
+core/beep_*
 core/tick_beep_engine.py
-core/beep_narrative.py
 
 # Confidential Agreements & Internal Math Theory
 docs/BEEP_*
