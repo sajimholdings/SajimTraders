@@ -9,6 +9,7 @@ import { ActiveTradeCard } from "../components/ActiveTradeCard";
 import { SignalsQuickGrid } from "../components/SignalsQuickGrid";
 import { RiskModeSheet } from "../components/RiskModeSheet";
 import { AccountConnectorModal } from "../components/AccountConnectorModal";
+import { AuthModal } from "../components/AuthModal";
 import { FreemiumBanner } from "../components/FreemiumBanner";
 import { AccountTelemetry, ClientSignal, ClientTrade } from "../lib/types";
 import { trackAction } from "../lib/logger";
@@ -118,6 +119,7 @@ const SEED_SIGNALS: ClientSignal[] = [
 export default function Home() {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [showConnectorModal, setShowConnectorModal] = useState<boolean>(false);
+  const [showAuthModal, setShowAuthModal] = useState<boolean>(false);
   const [showRiskSheet, setShowRiskSheet] = useState<boolean>(false);
   const [connectorInitialTab, setConnectorInitialTab] = useState<"demo" | "real">("demo");
   const [telemetry, setTelemetry] = useState<AccountTelemetry>(INITIAL_REAL_TELEMETRY);
@@ -443,6 +445,21 @@ export default function Home() {
       is_demo: updated.is_demo,
     });
   };
+  // Handle Email & Password Auth Success from Supabase
+  const handleAuthSuccess = (userData: { email: string; fullName: string; id: string }) => {
+    const authAccount: AccountTelemetry = {
+      ...INITIAL_REAL_TELEMETRY,
+      account_name: userData.fullName,
+      account_id: userData.id.slice(0, 8),
+      is_demo: false,
+    };
+    setTelemetry(authAccount);
+    setIsAuthenticated(true);
+    localStorage.setItem("sajim_auth", "true");
+    localStorage.setItem("sajim_active_account", JSON.stringify(authAccount));
+    showToast(`🎉 Welcome, ${userData.fullName}! Cockpit activated`);
+    trackAction("USER_AUTHENTICATED", { email: userData.email, id: userData.id });
+  };
 
   const handleScrollToSignals = () => {
     if (signalsSectionRef.current) {
@@ -464,7 +481,7 @@ export default function Home() {
         <GateScreen
           onLaunchDemo={handleLaunchDemo}
           onConnectReal={handleOpenConnectReal}
-          onGoogleSignIn={handleGoogleSignIn}
+          onOpenAuthModal={() => setShowAuthModal(true)}
           affiliateLink="https://headway.partners/user/signup?hwp=b158cc"
           liveStats={gateStats}
         />
@@ -541,6 +558,13 @@ export default function Home() {
         onConnectSuccess={handleAccountConnected}
         initialTab={connectorInitialTab}
         affiliateLink="https://headway.partners/user/signup?hwp=b158cc"
+      />
+
+      {/* Email & Password Supabase Auth Modal */}
+      <AuthModal
+        isOpen={showAuthModal}
+        onClose={() => setShowAuthModal(false)}
+        onSuccess={handleAuthSuccess}
       />
 
       {/* Risk Profile Selection Sheet */}

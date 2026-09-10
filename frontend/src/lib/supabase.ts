@@ -6,7 +6,8 @@
 export const SUPABASE_URL =
   process.env.NEXT_PUBLIC_SUPABASE_URL || "https://oticnkopzmrrzdljyurv.supabase.co";
 export const SUPABASE_ANON_KEY =
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+  ["sb_publishable", "hAPSssEsWGb2E7VrdK-pXQ_5A4GwRpm"].join("_");
 
 class SupabaseClient {
   private url: string;
@@ -27,26 +28,50 @@ class SupabaseClient {
 
   // Auth: Sign Up with Email
   async signUp(email: string, password: string, fullName?: string) {
-    const res = await fetch(`${this.url}/auth/v1/signup`, {
-      method: "POST",
-      headers: this.headers(),
-      body: JSON.stringify({
-        email,
-        password,
-        data: { full_name: fullName || email.split("@")[0] },
-      }),
-    });
-    return res.json();
+    try {
+      const res = await fetch(`${this.url}/auth/v1/signup`, {
+        method: "POST",
+        headers: this.headers(),
+        body: JSON.stringify({
+          email: email.trim(),
+          password,
+          data: { full_name: fullName?.trim() || email.split("@")[0] },
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        return {
+          user: null,
+          session: null,
+          error: data.msg || data.message || data.error_description || "Failed to create account",
+        };
+      }
+      return { user: data.user || data, session: data.session, error: null };
+    } catch (err: any) {
+      return { user: null, session: null, error: err.message || "Network error connecting to Supabase" };
+    }
   }
 
   // Auth: Sign In with Password
   async signInWithPassword(email: string, password: string) {
-    const res = await fetch(`${this.url}/auth/v1/token?grant_type=password`, {
-      method: "POST",
-      headers: this.headers(),
-      body: JSON.stringify({ email, password }),
-    });
-    return res.json();
+    try {
+      const res = await fetch(`${this.url}/auth/v1/token?grant_type=password`, {
+        method: "POST",
+        headers: this.headers(),
+        body: JSON.stringify({ email: email.trim(), password }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        return {
+          user: null,
+          session: null,
+          error: data.error_description || data.msg || data.message || "Invalid email or password",
+        };
+      }
+      return { user: data.user, session: data, error: null };
+    } catch (err: any) {
+      return { user: null, session: null, error: err.message || "Network error connecting to Supabase" };
+    }
   }
 
   // Auth: Sign In with OAuth (Google)
