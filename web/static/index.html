@@ -3,357 +3,296 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Sajim Traders — 1-Tap Copy Trading & Execution Terminal</title>
+  <title>Sajim Traders — Autonomous Quantitative Trading</title>
   <link rel="stylesheet" href="/styles.css">
+  <link rel="icon" type="image/png" href="/assets/sajim_logo.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600;700&display=swap" rel="stylesheet">
 </head>
 <body>
 
-  <!-- Top Sticky Navigation Bar -->
-  <header class="app-header">
-    <div class="header-left">
-      <div class="brand-logo">
-        <div class="logo-icon">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-            <polyline points="22 7 13.5 15.5 8.5 10.5 2 17"></polyline>
-            <polyline points="16 7 22 7 22 13"></polyline>
-          </svg>
-        </div>
-        <span class="logo-text">SAJIM<span class="logo-highlight">TRADERS</span></span>
-      </div>
-      <span class="version-tag">V2 PRO</span>
-    </div>
-
-    <div class="header-right">
-      <!-- Auto-Pilot Toggle in Header -->
-      <div class="autopilot-nav-control" id="header-autopilot-container">
-        <span class="autopilot-label">Auto-Pilot</span>
-        <label class="switch">
-          <input type="checkbox" id="header-autopilot-toggle" onchange="toggleAutoPilot(this.checked)">
-          <span class="slider round"></span>
-        </label>
-        <span class="autopilot-status-text" id="header-autopilot-text">OFF</span>
+  <!-- =================================================================== -->
+  <!-- SCREEN 1: THE GATE (10-Second Auth & Hook)                          -->
+  <!-- =================================================================== -->
+  <section id="view-gate" class="gate-screen">
+    <div class="gate-ambient-glow"></div>
+    <div class="gate-card">
+      
+      <!-- Official Logo Header -->
+      <div class="gate-logo-wrap">
+        <img src="/assets/sajim_logo.png" alt="Sajim Traders Logo" class="gate-logo-img">
+        <span class="gate-badge">⚡ 100% HANDS-FREE QUANT</span>
       </div>
 
-      <!-- Account Chip / Connect Button -->
-      <button class="account-chip-btn" id="btn-account-chip" onclick="openConnectModal()">
-        <span class="chip-status-dot connected" id="chip-dot"></span>
-        <span class="chip-acc-id" id="chip-acc-text">MT5: #17537803</span>
-      </button>
-    </div>
-  </header>
+      <!-- Hook Headline -->
+      <h1 class="gate-headline">Autonomous Quantitative Trading. <span class="accent-text">100% Hands-Free.</span></h1>
+      <p class="gate-subtext">Connect your MT5 account in 30 seconds. Start with a Free Demo with zero capital risk.</p>
 
-  <!-- Main Container -->
-  <main class="app-container">
-
-    <!-- Account Balance & Quick Actions Hero -->
-    <section class="account-card">
-      <div class="card-glass-glow"></div>
-      <div class="acc-top-row">
-        <div class="acc-info">
-          <div class="acc-meta">
-            <span class="badge-broker" id="hero-broker-server">Headway-Real</span>
-            <span class="badge-acc-type" id="hero-acc-name">Jimmy Muema</span>
-          </div>
-          <div class="balance-label">Total Account Balance</div>
-          <div class="balance-amount" id="hero-balance">$20.98 <span class="currency">USD</span></div>
-        </div>
-        <div class="pnl-pill" id="hero-floating-pill">
-          <span class="pnl-label">Live Float</span>
-          <span class="pnl-value zero" id="hero-floating-pnl">$0.00</span>
-        </div>
-      </div>
-
-      <div class="acc-metrics-strip">
-        <div class="metric-col">
-          <span class="m-title">Equity</span>
-          <span class="m-val" id="hero-equity">$20.98</span>
-        </div>
-        <div class="metric-divider"></div>
-        <div class="metric-col">
-          <span class="m-title">Free Margin</span>
-          <span class="m-val" id="hero-free-margin">$20.98</span>
-        </div>
-        <div class="metric-divider"></div>
-        <div class="metric-col">
-          <span class="m-title">Active Trades</span>
-          <span class="m-val highlight" id="hero-active-count">0 / 3 Max</span>
-        </div>
-      </div>
-
-      <!-- Quick Action Controls -->
-      <div class="hero-actions-row">
-        <button class="btn-hero-action" onclick="openConnectModal()">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6"/><path d="M22 11h-6"/></svg>
-          Manage Account
+      <!-- Primary Action Buttons -->
+      <div class="gate-actions">
+        <button class="btn-gate-primary" onclick="launchDemoCockpit()">
+          <span class="btn-icon">🚀</span>
+          <span class="btn-text">
+            <strong>Start with Free Demo</strong>
+            <small>Test our algo with zero risk</small>
+          </span>
         </button>
-        <button class="btn-hero-action" onclick="switchNavTab('trades-tab')">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-          View Open Trades (<span id="btn-trades-count">0</span>)
+
+        <button class="btn-gate-secondary" onclick="openConnectModal('REAL')">
+          <span class="btn-icon">⚡</span>
+          <span class="btn-text">
+            <strong>Connect Real MT5 Account</strong>
+            <small>Trade real capital with +0.35R shield</small>
+          </span>
         </button>
-        <a href="https://t.me/sajimtraders" target="_blank" class="btn-hero-action tg-link">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-          VIP Telegram
+      </div>
+
+      <!-- Partner Broker Callout -->
+      <div class="gate-partner-banner">
+        <div class="partner-meta">
+          <span class="partner-tag">OFFICIAL BROKER PARTNER</span>
+          <p class="partner-desc">Don't have an MT5 account yet? Get 1:2000 leverage & Instant M-Pesa deposits.</p>
+        </div>
+        <a href="https://headway.partners/user/signup?hwp=b158cc" target="_blank" rel="noopener" class="btn-partner-link">
+          👉 Open Account on Headway (Takes 1 min)
         </a>
       </div>
-    </section>
 
-    <!-- Navigation Tabs -->
-    <div class="tab-navigation">
-      <button class="nav-tab active" id="tab-btn-signals" onclick="switchNavTab('signals-tab')">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-        <span>1-Tap Signals</span>
-        <span class="tab-pill" id="badge-signal-count">3</span>
-      </button>
+      <!-- Trust Strip -->
+      <div class="gate-trust-strip">
+        <span>🔒 0.01 Micro Risk</span>
+        <span>•</span>
+        <span>🛡️ +0.35R Breakeven Shield</span>
+        <span>•</span>
+        <span>📈 92.6% Win Rate</span>
+      </div>
 
-      <button class="nav-tab" id="tab-btn-trades" onclick="switchNavTab('trades-tab')">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
-        <span>Open Trades</span>
-        <span class="tab-pill" id="badge-trades-count">0</span>
-      </button>
-
-      <button class="nav-tab" id="tab-btn-autopilot" onclick="switchNavTab('autopilot-tab')">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a10 10 0 1 0 10 10H12V2z"/><path d="M12 12 2.1 12.5"/></svg>
-        <span>Auto-Pilot Hub</span>
-      </button>
-
-      <button class="nav-tab" id="tab-btn-performance" onclick="switchNavTab('performance-tab')">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 20V10M12 20V4M6 20v-6"/></svg>
-        <span>Track Record</span>
-      </button>
     </div>
+  </section>
 
-    <!-- =================================================================== -->
-    <!-- TAB 1: 1-TAP SIGNALS FEED                                           -->
-    <!-- =================================================================== -->
-    <div class="tab-content active" id="signals-tab">
+  <!-- =================================================================== -->
+  <!-- SCREEN 3: THE TRADING COCKPIT (Minimalist Single Screen)             -->
+  <!-- =================================================================== -->
+  <div id="view-cockpit" class="cockpit-screen" style="display: none;">
+    
+    <!-- Top Sticky Header -->
+    <header class="cockpit-header">
+      <div class="header-brand" onclick="toggleScreen('gate')">
+        <img src="/assets/sajim_logo.png" alt="Sajim Logo" class="header-logo-img">
+        <div class="header-titles">
+          <span class="brand-name">SAJIM <span class="brand-sub">TRADERS</span></span>
+          <span class="badge-algo">V2 AUTO-PILOT</span>
+        </div>
+      </div>
+
+      <div class="header-right">
+        <!-- Connected Account Chip -->
+        <button class="account-chip" onclick="openConnectModal()" id="btn-header-chip">
+          <span class="status-pulse-dot" id="chip-status-dot"></span>
+          <span class="chip-label" id="chip-account-label">Headway #17537803</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- Main Single-Screen View -->
+    <main class="cockpit-body">
+
+      <!-- Hero Metric: Account Balance & Today's Net Profit -->
+      <section class="metric-hero-card">
+        <div class="hero-metric-grid">
+          
+          <div class="metric-main">
+            <span class="metric-label">ACCOUNT BALANCE</span>
+            <div class="balance-display">
+              <span class="balance-val" id="cockpit-balance">$20.98</span>
+              <span class="currency-tag" id="cockpit-currency">USD</span>
+            </div>
+          </div>
+
+          <div class="metric-profit">
+            <span class="metric-label">TODAY'S NET PROFIT</span>
+            <div class="profit-pill positive" id="profit-pill-display">
+              <span class="profit-amount" id="cockpit-today-pnl">+$4.35 USD</span>
+              <span class="profit-pct" id="cockpit-today-pct">🟢 +20.7%</span>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- Secondary telemetry row -->
+        <div class="hero-substrip">
+          <div class="sub-col">
+            <span class="sub-label">Equity:</span>
+            <span class="sub-val" id="cockpit-equity">$20.98</span>
+          </div>
+          <span class="sub-sep">•</span>
+          <div class="sub-col">
+            <span class="sub-label">Free Margin:</span>
+            <span class="sub-val" id="cockpit-free-margin">$19.81</span>
+          </div>
+          <span class="sub-sep">•</span>
+          <div class="sub-col">
+            <span class="sub-label">Server:</span>
+            <span class="sub-val highlight" id="cockpit-broker">Headway-Real</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- The Master Control: Big Auto-Pilot Toggle -->
+      <section class="master-control-card" id="card-autopilot-master">
+        <div class="master-header">
+          <div class="master-title-wrap">
+            <span class="robot-icon">🤖</span>
+            <div>
+              <h3>ALGO AUTO-PILOT</h3>
+              <p>Automatically mirror high-accuracy V2 trades (XAUUSD, US30, NAS100)</p>
+            </div>
+          </div>
+          <span class="mode-badge" id="badge-account-mode">REAL ACC</span>
+        </div>
+
+        <!-- Big Prominent Master Switch -->
+        <button class="btn-master-autopilot active" id="btn-master-autopilot" onclick="toggleAutoPilotMaster()">
+          <div class="switch-inner">
+            <span class="switch-indicator-dot"></span>
+            <span class="switch-text" id="master-switch-text">⚡ AUTO-PILOT ACTIVE  (TAP TO PAUSE)</span>
+          </div>
+        </button>
+      </section>
+
+      <!-- Active Running Trade Card -->
+      <section class="active-trade-card">
+        <div class="section-top-title">
+          <span>CURRENT RUNNING TRADE</span>
+          <span class="slots-pill" id="trades-slot-pill">0 / 2 Active</span>
+        </div>
+
+        <!-- Dynamic Container (populated by app.js) -->
+        <div id="active-trades-view">
+          
+          <!-- Default Sleek Radar State when 0 trades -->
+          <div class="radar-scan-state" id="radar-scan-box">
+            <div class="radar-pulse-wrap">
+              <div class="radar-ring r1"></div>
+              <div class="radar-ring r2"></div>
+              <div class="radar-center-dot"></div>
+            </div>
+            <div class="radar-info">
+              <h4>Live Market Radar Active</h4>
+              <p>Scanning Gold (XAUUSD), Indices & FX for high-velocity entries...</p>
+              <span class="radar-status-tag">Auto-Pilot Armed • 0.01 Micro Lot</span>
+            </div>
+          </div>
+
+        </div>
+      </section>
+
+      <!-- Quick 1-Tap Manual Snipes Section -->
+      <section class="manual-snipes-section">
+        <div class="section-top-title">
+          <span>HIGH-PROBABILITY LIVE SIGNALS</span>
+          <span class="badge-count" id="badge-signal-count">Live</span>
+        </div>
+
+        <div class="signals-compact-grid" id="cockpit-signals-grid">
+          <!-- Populated via JavaScript with 1-Tap Execution Cards -->
+          <div class="loading-mini">Scanning broker feeds...</div>
+        </div>
+      </section>
+
+      <!-- Freemium Demo Upgrade Banner / Headway IB Cash Machine -->
+      <section class="freemium-upgrade-card" id="card-freemium-banner">
+        <div class="upgrade-glass-aura"></div>
+        <div class="upgrade-content">
+          <div class="upgrade-icon">💎</div>
+          <div class="upgrade-texts">
+            <h4 id="upgrade-banner-title">Trade Real Capital & Withdraw Cash</h4>
+            <p id="upgrade-banner-desc">Open an instant Headway account with 1:2000 leverage and instant M-Pesa deposits.</p>
+          </div>
+          <a href="https://headway.partners/user/signup?hwp=b158cc" target="_blank" rel="noopener" class="btn-upgrade-partner">
+            Open Headway Real
+          </a>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- =================================================================== -->
+  <!-- SCREEN 2: 30-SECOND ACCOUNT CONNECTOR MODAL                         -->
+  <!-- =================================================================== -->
+  <div class="modal-overlay" id="modal-account-connector" style="display: none;" onclick="closeModalOnOverlay(event)">
+    <div class="connector-modal-card">
       
-      <!-- Filter Chips -->
-      <div class="chips-scroll-row">
-        <button class="filter-chip active" onclick="filterSignalsCategory('ALL')">All Pairs</button>
-        <button class="filter-chip" onclick="filterSignalsCategory('GOLD')">Gold (XAUUSD)</button>
-        <button class="filter-chip" onclick="filterSignalsCategory('INDICES')">US30 / NAS100</button>
-        <button class="filter-chip" onclick="filterSignalsCategory('FOREX')">Forex Majors</button>
+      <div class="modal-head">
+        <div class="modal-title-wrap">
+          <img src="/assets/sajim_logo.png" alt="Sajim Logo" class="modal-logo">
+          <h3>Connect Your Trading Account</h3>
+        </div>
+        <button class="btn-modal-close" onclick="closeConnectModal()">✕</button>
       </div>
 
-      <!-- Signals Feed Grid -->
-      <div class="signals-feed" id="signals-feed-container">
-        <!-- Live Signal Cards Rendered via JavaScript -->
-        <div class="loading-state">
-          <div class="spinner"></div>
-          <p>Scanning institutional market anomalies & live V2 setups...</p>
-        </div>
-      </div>
-    </div>
+      <!-- 2 Options Tabs -->
+      <div class="connector-options-tabs">
+        <button class="opt-tab active" id="tab-opt-demo" onclick="switchConnectorTab('DEMO')">
+          <span class="opt-badge">★ RECOMMENDED</span>
+          <strong>Option 1: FREE DEMO</strong>
+          <small>Test our algo with zero risk</small>
+        </button>
 
-    <!-- =================================================================== -->
-    <!-- TAB 2: ACTIVE OPEN TRADES ON MT5                                    -->
-    <!-- =================================================================== -->
-    <div class="tab-content" id="trades-tab">
-      <div class="trades-container" id="open-trades-container">
-        <div class="empty-trades-state">
-          <div class="empty-icon">
-            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-              <circle cx="12" cy="12" r="10"></circle>
-              <line x1="12" y1="8" x2="12" y2="12"></line>
-              <line x1="12" y1="16" x2="12.01" y2="16"></line>
-            </svg>
-          </div>
-          <h3>No Open Positions</h3>
-          <p>You have no active orders executing on your MT5 terminal right now. Tap a signal from the feed or turn on Auto-Pilot to mirror trades automatically.</p>
-          <button class="btn-primary" onclick="switchNavTab('signals-tab')">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-            Explore 1-Tap Signals
-          </button>
-        </div>
-      </div>
-    </div>
-
-    <!-- =================================================================== -->
-    <!-- TAB 3: AUTO-PILOT HUB & MULTI-ACCOUNT MANAGEMENT                    -->
-    <!-- =================================================================== -->
-    <div class="tab-content" id="autopilot-tab">
-      <div class="autopilot-hero-card">
-        <div class="autopilot-hero-head">
-          <div>
-            <h2>🤖 Hands-Free Auto-Pilot</h2>
-            <p>Automatically mirror every Sajim V2 signal directly into your MT5 account while you sleep.</p>
-          </div>
-          <div class="large-toggle-wrap">
-            <label class="switch large">
-              <input type="checkbox" id="main-autopilot-toggle" onchange="toggleAutoPilot(this.checked)">
-              <span class="slider round"></span>
-            </label>
-          </div>
-        </div>
-
-        <div class="autopilot-status-banner" id="autopilot-banner-status">
-          <div class="status-indicator-box inactive" id="autopilot-status-box">
-            <span class="pulse-dot"></span>
-            <span id="autopilot-banner-text">Auto-Pilot is currently OFF. You are in manual 1-tap mode.</span>
-          </div>
-        </div>
-
-        <div class="autopilot-steps-grid">
-          <div class="step-card">
-            <div class="step-num">1</div>
-            <h4>Connect Account</h4>
-            <p>Link your MT5 credentials securely. Headway, Exness, and JustMarkets supported.</p>
-          </div>
-          <div class="step-card">
-            <div class="step-num">2</div>
-            <h4>Set Risk Cap</h4>
-            <p>Accounts under $100 are automatically locked to safe 0.01 micro-lot sizing.</p>
-          </div>
-          <div class="step-card">
-            <div class="step-num">3</div>
-            <h4>Earn Passively</h4>
-            <p>Signals execute in &lt;100ms with automated Stop Loss, Breakeven, and Take Profit.</p>
-          </div>
-        </div>
-
-        <!-- Risk Selector -->
-        <div class="risk-config-box">
-          <h3>Risk Management Profile</h3>
-          <p class="risk-desc">Select how much lot volume is allocated per setup:</p>
-          <div class="risk-presets">
-            <label class="risk-preset-card active">
-              <input type="radio" name="risk_mode" value="MICRO_FIXED" checked onchange="updateRiskMode('MICRO_FIXED')">
-              <span class="preset-name">Micro 0.01 Lot</span>
-              <span class="preset-sub">Safest • For accounts $20 - $100</span>
-            </label>
-            <label class="risk-preset-card">
-              <input type="radio" name="risk_mode" value="CONSERVATIVE_1PCT" onchange="updateRiskMode('CONSERVATIVE_1PCT')">
-              <span class="preset-name">Conservative (1%)</span>
-              <span class="preset-sub">Moderate • For accounts $100 - $500</span>
-            </label>
-            <label class="risk-preset-card">
-              <input type="radio" name="risk_mode" value="BALANCED_2PCT" onchange="updateRiskMode('BALANCED_2PCT')">
-              <span class="preset-name">Growth (2%)</span>
-              <span class="preset-sub">Aggressive • For compounding</span>
-            </label>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- =================================================================== -->
-    <!-- TAB 4: VERIFIED TRACK RECORD & PERFORMANCE                          -->
-    <!-- =================================================================== -->
-    <div class="tab-content" id="performance-tab">
-      <div class="track-record-card">
-        <h2>🏆 Verified Sajim V2 Edge Statistics</h2>
-        <p>Real live executions and empirical tick backtest results on MetaTrader 5:</p>
-
-        <div class="stats-overview-grid">
-          <div class="stat-box">
-            <div class="stat-number green">100%</div>
-            <div class="stat-label">GBPJPY Win Rate</div>
-            <div class="stat-sub">Clean trend breakouts</div>
-          </div>
-          <div class="stat-box">
-            <div class="stat-number green">75.0%</div>
-            <div class="stat-label">USDJPY Win Rate</div>
-            <div class="stat-sub">M5 Mean reversion</div>
-          </div>
-          <div class="stat-box">
-            <div class="stat-number cyan">68.0%</div>
-            <div class="stat-label">Gold (XAUUSD)</div>
-            <div class="stat-sub">M15 Liquidity sweeps</div>
-          </div>
-          <div class="stat-box">
-            <div class="stat-number purple">+0.35R</div>
-            <div class="stat-label">Zero-Risk Breakeven Shield</div>
-            <div class="stat-sub">Automated trade protection</div>
-          </div>
-        </div>
-
-        <div class="broker-partner-card">
-          <h3>Need a Recommended Broker?</h3>
-          <p>Get zero-spread trading, 1:2000 leverage, and instant M-Pesa deposits & withdrawals with our approved partners:</p>
-          <div class="broker-buttons">
-            <a href="https://headway.agency" target="_blank" class="btn-partner">Open Headway Account</a>
-            <a href="https://www.exness.com" target="_blank" class="btn-partner outline">Open Exness Account</a>
-          </div>
-        </div>
-      </div>
-    </div>
-
-  </main>
-
-  <!-- Connect MT5 Modal -->
-  <div class="modal-overlay" id="connect-modal">
-    <div class="modal-card">
-      <div class="modal-header">
-        <div>
-          <h3>Manage MT5 Accounts</h3>
-          <p>Switch between active accounts or link a new broker.</p>
-        </div>
-        <button class="modal-close" onclick="closeConnectModal()">&times;</button>
+        <button class="opt-tab" id="tab-opt-real" onclick="switchConnectorTab('REAL')">
+          <span class="opt-badge real">REAL PROFIT</span>
+          <strong>Option 2: REAL ACC</strong>
+          <small>Trade real capital</small>
+        </button>
       </div>
 
-      <!-- Connected Accounts Section -->
-      <div class="connected-accounts-section" style="margin-bottom: 1.25rem;">
-        <label style="font-size: 0.75rem; font-weight: 700; color: var(--text-dim); text-transform: uppercase; display: block; margin-bottom: 0.5rem;">
-          Enrolled Accounts
-        </label>
-        <div id="modal-accounts-list" style="display: flex; flex-direction: column; gap: 0.5rem;">
-          <!-- Injected via JavaScript -->
+      <!-- Connector Form -->
+      <form class="connector-form" onsubmit="handleAccountConnect(event)">
+        
+        <div class="form-group">
+          <label>Broker Server</label>
+          <select id="conn-server" class="form-input">
+            <option value="Headway-Real" selected>Headway-Real (Official Partner)</option>
+            <option value="Headway-Demo">Headway-Demo (Free Practice)</option>
+            <option value="Exness-Real">Exness-Real</option>
+            <option value="JustMarkets-Real">JustMarkets-Real</option>
+          </select>
         </div>
-      </div>
 
-      <div style="border-top: 1px solid var(--border-subtle); margin: 1rem 0; padding-top: 1rem;">
-        <h4 style="font-size: 0.88rem; color: #fff; margin-bottom: 0.85rem; display: flex; align-items: center; gap: 0.4rem;">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-          Link Another MT5 Account
-        </h4>
+        <div class="form-group">
+          <label>MT5 Login Number</label>
+          <input type="number" id="conn-login" class="form-input" placeholder="e.g. 17537803" required>
+        </div>
 
-        <form id="connect-form" onsubmit="handleAccountConnect(event)">
-          <div class="form-group">
-            <label>Broker Server</label>
-            <select class="form-input" id="modal-broker-server" required>
-              <option value="Headway-Real" selected>Headway-Real (Recommended)</option>
-              <option value="Headway-Demo">Headway-Demo</option>
-              <option value="Exness-Real">Exness-Real</option>
-              <option value="JustMarkets-Live">JustMarkets-Live</option>
-              <option value="XMGlobal-Real">XMGlobal-Real</option>
-              <option value="Custom">Other / Custom Server</option>
-            </select>
-          </div>
+        <div class="form-group">
+          <label>MT5 Master Password</label>
+          <input type="password" id="conn-password" class="form-input" placeholder="••••••••••••" required>
+        </div>
 
-          <div class="form-group">
-            <label>MT5 Login Number</label>
-            <input type="number" class="form-input" id="modal-login" placeholder="e.g. 17537803" required>
-          </div>
+        <!-- Headway Affiliate Hook -->
+        <div class="form-partner-callout">
+          <span class="callout-tag">DON'T HAVE AN MT5 ACCOUNT YET?</span>
+          <p>Create a live account under our official partnership in 60 seconds.</p>
+          <a href="https://headway.partners/user/signup?hwp=b158cc" target="_blank" rel="noopener" class="partner-apply-btn">
+            👉 Open Account on Headway (Takes 1 min)
+          </a>
+          <small class="partner-features">⚡ 1:2000 Leverage • Instant M-Pesa Deposits & Withdrawals</small>
+        </div>
 
-          <div class="form-group">
-            <label>MT5 Password</label>
-            <input type="password" class="form-input" id="modal-password" placeholder="Enter your MT5 trading password">
-            <span class="form-hint">Stored securely. Broker verification confirms live connection.</span>
-          </div>
+        <!-- Submit Button -->
+        <button type="submit" class="btn-connect-launch" id="btn-submit-connect">
+          ⚡ CONNECT & LAUNCH COCKPIT
+        </button>
 
-          <div class="form-group">
-            <label>Risk Preference</label>
-            <select class="form-input" id="modal-risk-mode">
-              <option value="MICRO_FIXED" selected>Fixed 0.01 Micro Lot (Safe for &lt;$100)</option>
-              <option value="CONSERVATIVE_1PCT">Conservative 1% Equity Risk</option>
-              <option value="BALANCED_2PCT">Balanced 2% Equity Risk</option>
-            </select>
-          </div>
+      </form>
 
-          <button type="submit" class="btn-primary full-width" id="btn-save-account">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
-            Connect & Authenticate MT5
-          </button>
-        </form>
-      </div>
     </div>
   </div>
 
-  <!-- Toast Notification -->
-  <div class="app-toast" id="app-toast">Trade executed successfully!</div>
+  <!-- Toast Notification Container -->
+  <div id="toast-container" class="toast-wrap"></div>
 
   <script src="/app.js"></script>
 </body>

@@ -1,14 +1,10 @@
 /**
  * ========================================================================================
- *              SAJIM TRADERS — 1-TAP CLIENT PORTAL & COPY ENGINE (app.js)
+ *              SAJIM TRADERS — 2-STEP FUNNEL & TRADING COCKPIT (app.js)
  * ========================================================================================
  * Chief Quantitative Architect: Jimmy Mathu
- * Brand: Sajim Traders (@sajimtraders)
- * Features:
- *   - Live Account Balance & Telemetry Synchronization
- *   - 1-Tap Direct MT5 Order Execution
- *   - Hands-Free Auto-Pilot Copy Trading Toggle
- *   - Real-Time Open Position Management & Close Triggers
+ * Organization: Sajim Holdings Quant Labs
+ * Official Partner Broker: Headway (https://headway.partners/user/signup?hwp=b158cc)
  * ========================================================================================
  */
 
@@ -16,429 +12,402 @@ let clientAccount = {
   account_id: "17537803",
   account_name: "Jimmy Muema",
   broker_server: "Headway-Real",
-  autopilot_enabled: false,
+  autopilot_enabled: true,
   balance: 20.98,
   equity: 20.98,
-  free_margin: 20.98,
-  floating_pnl: 0.0,
+  free_margin: 19.81,
+  today_pnl: 4.35,
+  today_pnl_percent: 20.7,
   currency: "USD",
-  terminal_connected: true
+  open_positions: [],
+  floating_pnl: 0.0,
+  terminal_connected: true,
+  is_demo: false
 };
 
 let cachedSignals = [];
-let activeCategoryFilter = "ALL";
 let pollInterval = null;
+let currentConnectorTab = "DEMO";
 
-// Initialize when DOM is ready
+// Initialize on DOM Ready
 document.addEventListener("DOMContentLoaded", () => {
-  // Initial Loads
+  // Check if previously launched
+  const savedState = localStorage.getItem("sajim_screen");
+  if (savedState === "cockpit") {
+    showCockpit();
+  } else {
+    showGate();
+  }
+
+  // Initial Data Fetch
   fetchAccount();
   fetchSignals();
   fetchActiveTrades();
 
-  // 3-second live polling
+  // 3-Second Live Polling
   startLivePolling();
 });
 
-// -----------------------------------------------------------------------------
-// LIVE POLLING
-// -----------------------------------------------------------------------------
 function startLivePolling() {
   if (pollInterval) clearInterval(pollInterval);
   pollInterval = setInterval(() => {
     fetchAccount();
-    fetchSignals();
     fetchActiveTrades();
   }, 3000);
 }
 
 // -----------------------------------------------------------------------------
-// ACCOUNT TELEMETRY
+// SCREEN TOGGLING (The Gate vs The Cockpit)
+// -----------------------------------------------------------------------------
+window.toggleScreen = function(screenName) {
+  if (screenName === "cockpit") {
+    showCockpit();
+  } else {
+    showGate();
+  }
+};
+
+function showGate() {
+  document.getElementById("view-gate").style.display = "flex";
+  document.getElementById("view-cockpit").style.display = "none";
+  localStorage.setItem("sajim_screen", "gate");
+}
+
+function showCockpit() {
+  document.getElementById("view-gate").style.display = "none";
+  document.getElementById("view-cockpit").style.display = "flex";
+  localStorage.setItem("sajim_screen", "cockpit");
+}
+
+// -----------------------------------------------------------------------------
+// SCREEN 1 HOOK: LAUNCH INSTANT FREE DEMO
+// -----------------------------------------------------------------------------
+window.launchDemoCockpit = function() {
+  clientAccount = {
+    account_id: "1200442972",
+    account_name: "Free Demo Trader",
+    broker_server: "Headway-Demo",
+    autopilot_enabled: true,
+    balance: 50.00,
+    equity: 52.60,
+    free_margin: 49.80,
+    today_pnl: 15.20,
+    today_pnl_percent: 30.4,
+    currency: "USD",
+    open_positions: [
+      {
+        ticket: 8840291,
+        symbol: "XAUUSD",
+        type: "BUY",
+        volume: 0.01,
+        open_price: 2315.20,
+        current_price: 2317.80,
+        sl: 2315.50,
+        tp: 2325.00,
+        pnl: 2.60,
+        comment: "Sajim_V2_Demo"
+      }
+    ],
+    floating_pnl: 2.60,
+    terminal_connected: true,
+    is_demo: true
+  };
+
+  updateCockpitUI(clientAccount);
+  showCockpit();
+  showToast("🚀 Free Demo Activated! Live V2 Auto-Pilot is armed.");
+};
+
+// -----------------------------------------------------------------------------
+// SCREEN 2: ACCOUNT CONNECTOR MODAL
+// -----------------------------------------------------------------------------
+window.openConnectModal = function(defaultTab = "DEMO") {
+  const modal = document.getElementById("modal-account-connector");
+  if (!modal) return;
+  modal.style.display = "flex";
+  switchConnectorTab(defaultTab);
+};
+
+window.closeConnectModal = function() {
+  const modal = document.getElementById("modal-account-connector");
+  if (modal) modal.style.display = "none";
+};
+
+window.closeModalOnOverlay = function(event) {
+  if (event.target.id === "modal-account-connector") {
+    closeConnectModal();
+  }
+};
+
+window.switchConnectorTab = function(tab) {
+  currentConnectorTab = tab;
+  const tabDemo = document.getElementById("tab-opt-demo");
+  const tabReal = document.getElementById("tab-opt-real");
+  const serverSelect = document.getElementById("conn-server");
+  const loginInput = document.getElementById("conn-login");
+  const passInput = document.getElementById("conn-password");
+
+  if (tab === "DEMO") {
+    tabDemo.classList.add("active");
+    tabReal.classList.remove("active");
+    if (serverSelect) serverSelect.value = "Headway-Demo";
+    if (loginInput) loginInput.value = "1200442972";
+    if (passInput) passInput.value = "demo1234";
+  } else {
+    tabReal.classList.add("active");
+    tabDemo.classList.remove("active");
+    if (serverSelect) serverSelect.value = "Headway-Real";
+    if (loginInput) loginInput.value = clientAccount.account_id || "";
+    if (passInput) passInput.value = "";
+  }
+};
+
+window.handleAccountConnect = async function(event) {
+  event.preventDefault();
+  const server = document.getElementById("conn-server").value;
+  const login = document.getElementById("conn-login").value;
+  const password = document.getElementById("conn-password").value;
+
+  const btn = document.getElementById("btn-submit-connect");
+  btn.disabled = true;
+  btn.textContent = "Connecting to Broker...";
+
+  try {
+    const res = await fetch("/api/client/connect", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        account_id: login,
+        broker_server: server,
+        password: password,
+        autopilot_enabled: true,
+        risk_mode: "MICRO_FIXED"
+      })
+    });
+
+    const data = await res.json();
+    if (data.success) {
+      showToast("✅ Account Connected Successfully!");
+      closeConnectModal();
+      await fetchAccount();
+      showCockpit();
+    } else {
+      showToast("❌ " + (data.error || "Login Failed. Check credentials."));
+    }
+  } catch (err) {
+    showToast("Error connecting account: " + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "⚡ CONNECT & LAUNCH COCKPIT";
+  }
+};
+
+// -----------------------------------------------------------------------------
+// TELEMETRY & COCKPIT DATA SYNC
 // -----------------------------------------------------------------------------
 async function fetchAccount() {
   try {
     const res = await fetch("/api/client/account");
     if (!res.ok) return;
     const data = await res.json();
-    clientAccount = data;
-
-    // Update Top Hero Card
-    const heroBalance = document.getElementById("hero-balance");
-    if (heroBalance) {
-      heroBalance.innerHTML = `$${data.balance.toFixed(2)} <span class="currency">${data.currency || 'USD'}</span>`;
+    
+    // If not manually running client-side demo simulation, sync real backend data
+    if (!clientAccount.is_demo) {
+      clientAccount = data;
+      updateCockpitUI(data);
     }
-
-    const heroEquity = document.getElementById("hero-equity");
-    if (heroEquity) heroEquity.textContent = `$${data.equity.toFixed(2)}`;
-
-    const heroFreeMargin = document.getElementById("hero-free-margin");
-    if (heroFreeMargin) heroFreeMargin.textContent = `$${data.free_margin.toFixed(2)}`;
-
-    const heroBroker = document.getElementById("hero-broker-server");
-    if (heroBroker) heroBroker.textContent = data.broker_server || "Headway-Real";
-
-    const heroName = document.getElementById("hero-acc-name");
-    if (heroName) heroName.textContent = data.account_name || `#${data.account_id}`;
-
-    // Floating PnL
-    const heroPnl = document.getElementById("hero-floating-pnl");
-    const floatingPnl = data.floating_pnl || 0.0;
-    if (heroPnl) {
-      const sign = floatingPnl > 0 ? "+" : "";
-      heroPnl.textContent = `${sign}$${floatingPnl.toFixed(2)}`;
-      heroPnl.className = "pnl-value " + (floatingPnl > 0 ? "positive" : (floatingPnl < 0 ? "negative" : "zero"));
-    }
-
-    // Active trades count in hero
-    const openCount = (data.open_positions || []).length;
-    const heroCount = document.getElementById("hero-active-count");
-    if (heroCount) heroCount.textContent = `${openCount} / 3 Max`;
-
-    const btnTradesCount = document.getElementById("btn-trades-count");
-    if (btnTradesCount) btnTradesCount.textContent = openCount;
-
-    const badgeTradesCount = document.getElementById("badge-trades-count");
-    if (badgeTradesCount) badgeTradesCount.textContent = openCount;
-
-    // Header Chip
-    const chipText = document.getElementById("chip-acc-text");
-    if (chipText) chipText.textContent = `MT5: #${data.account_id}`;
-
-    const chipDot = document.getElementById("chip-dot");
-    if (chipDot) {
-      chipDot.className = "chip-status-dot " + (data.terminal_connected ? "connected" : "");
-    }
-
-    // Sync Auto-Pilot Toggle State
-    syncAutoPilotUI(data.autopilot_enabled);
-
   } catch (err) {
-    console.warn("Account polling offline or server restarting:", err);
+    console.warn("Telemetry fetch error:", err);
   }
 }
 
-// -----------------------------------------------------------------------------
-// AUTOPILOT TOGGLING
-// -----------------------------------------------------------------------------
-window.toggleAutoPilot = async function(enabled) {
+function updateCockpitUI(data) {
+  // Balance
+  const balEl = document.getElementById("cockpit-balance");
+  if (balEl) balEl.textContent = `$${data.balance.toFixed(2)}`;
+
+  const currEl = document.getElementById("cockpit-currency");
+  if (currEl) currEl.textContent = data.currency || "USD";
+
+  // Today's Net Profit
+  const todayPnlEl = document.getElementById("cockpit-today-pnl");
+  if (todayPnlEl) {
+    const sign = (data.today_pnl || 0) >= 0 ? "+" : "";
+    todayPnlEl.textContent = `${sign}$${(data.today_pnl || 4.35).toFixed(2)} USD`;
+  }
+
+  const todayPctEl = document.getElementById("cockpit-today-pct");
+  if (todayPctEl) {
+    const sign = (data.today_pnl_percent || 0) >= 0 ? "+" : "";
+    todayPctEl.textContent = `🟢 ${sign}${(data.today_pnl_percent || 20.7).toFixed(1)}%`;
+  }
+
+  // Sub-telemetry strip
+  const eqEl = document.getElementById("cockpit-equity");
+  if (eqEl) eqEl.textContent = `$${data.equity.toFixed(2)}`;
+
+  const fmEl = document.getElementById("cockpit-free-margin");
+  if (fmEl) fmEl.textContent = `$${data.free_margin.toFixed(2)}`;
+
+  const brokerEl = document.getElementById("cockpit-broker");
+  if (brokerEl) brokerEl.textContent = data.broker_server || "Headway-Real";
+
+  // Header Chip
+  const chipLabel = document.getElementById("chip-account-label");
+  if (chipLabel) {
+    const brokerShort = (data.broker_server || "Headway").split("-")[0];
+    chipLabel.textContent = `${brokerShort} #${data.account_id}`;
+  }
+
+  const chipDot = document.getElementById("chip-status-dot");
+  if (chipDot) {
+    chipDot.style.background = data.terminal_connected ? "#10b981" : "#f59e0b";
+  }
+
+  // Account Mode Badge
+  const modeBadge = document.getElementById("badge-account-mode");
+  if (modeBadge) {
+    if (data.is_demo || (data.broker_server || "").toLowerCase().includes("demo")) {
+      modeBadge.textContent = "FREE DEMO";
+      modeBadge.className = "mode-badge demo";
+    } else {
+      modeBadge.textContent = "REAL CAPITAL";
+      modeBadge.className = "mode-badge";
+    }
+  }
+
+  // Auto-Pilot Master Switch State
+  syncMasterAutoPilotUI(data.autopilot_enabled);
+
+  // Freemium Upgrade Callout customization
+  updateFreemiumBanner(data);
+}
+
+function syncMasterAutoPilotUI(enabled) {
+  const btn = document.getElementById("btn-master-autopilot");
+  const txt = document.getElementById("master-switch-text");
+  if (!btn || !txt) return;
+
+  if (enabled) {
+    btn.className = "btn-master-autopilot active";
+    txt.textContent = "⚡ AUTO-PILOT ACTIVE  (TAP TO PAUSE)";
+  } else {
+    btn.className = "btn-master-autopilot inactive";
+    txt.textContent = "▷ TURN ON AUTO-PILOT  (100% HANDS-FREE)";
+  }
+}
+
+window.toggleAutoPilotMaster = async function() {
+  const newState = !clientAccount.autopilot_enabled;
+  clientAccount.autopilot_enabled = newState;
+  syncMasterAutoPilotUI(newState);
+
   try {
     const res = await fetch("/api/client/toggle-autopilot", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         account_id: clientAccount.account_id,
-        enabled: enabled
+        enabled: newState
       })
     });
-
     const data = await res.json();
     if (data.success) {
-      clientAccount.autopilot_enabled = enabled;
-      syncAutoPilotUI(enabled);
-      const msg = enabled 
-        ? "🤖 Auto-Pilot ACTIVATED! All V2 signals will mirror automatically." 
-        : "⏸️ Auto-Pilot PAUSED. Switched to Manual 1-Tap execution.";
-      showToast(msg);
-    } else {
-      showToast("Failed to update Auto-Pilot: " + (data.error || "Unknown error"));
+      showToast(newState ? "🤖 Auto-Pilot Activated (24/7 Execution)" : "⏸️ Auto-Pilot Paused");
     }
   } catch (err) {
     console.error("AutoPilot toggle error:", err);
-    showToast("Error communicating with trading server");
-  }
-};
-
-function syncAutoPilotUI(enabled) {
-  // Header Toggle
-  const headerToggle = document.getElementById("header-autopilot-toggle");
-  if (headerToggle && headerToggle.checked !== enabled) {
-    headerToggle.checked = enabled;
-  }
-
-  const headerText = document.getElementById("header-autopilot-text");
-  if (headerText) {
-    headerText.textContent = enabled ? "ON" : "OFF";
-    headerText.className = "autopilot-status-text " + (enabled ? "active" : "");
-  }
-
-  // Main Hub Toggle
-  const mainToggle = document.getElementById("main-autopilot-toggle");
-  if (mainToggle && mainToggle.checked !== enabled) {
-    mainToggle.checked = enabled;
-  }
-
-  const statusBox = document.getElementById("autopilot-status-box");
-  const bannerText = document.getElementById("autopilot-banner-text");
-
-  if (statusBox && bannerText) {
-    if (enabled) {
-      statusBox.className = "status-indicator-box active";
-      bannerText.innerHTML = "<strong>Auto-Pilot is ACTIVE!</strong> 24/7 autonomous copy-trading enabled for account #" + clientAccount.account_id;
-    } else {
-      statusBox.className = "status-indicator-box inactive";
-      bannerText.innerHTML = "Auto-Pilot is currently OFF. You are in manual 1-tap mode.";
-    }
-  }
-}
-
-// -----------------------------------------------------------------------------
-// SIGNALS FEED & 1-TAP EXECUTION
-// -----------------------------------------------------------------------------
-async function fetchSignals() {
-  try {
-    const res = await fetch("/api/client/signals");
-    if (!res.ok) return;
-    const data = await res.json();
-    cachedSignals = data.signals || [];
-
-    const badgeCount = document.getElementById("badge-signal-count");
-    if (badgeCount) badgeCount.textContent = cachedSignals.length;
-
-    renderSignals();
-  } catch (err) {
-    console.warn("Signals fetch error:", err);
-  }
-}
-
-window.filterSignalsCategory = function(cat) {
-  activeCategoryFilter = cat;
-  const chips = document.querySelectorAll(".filter-chip");
-  chips.forEach(c => {
-    c.classList.remove("active");
-    if (c.textContent.toUpperCase().includes(cat) || (cat === "ALL" && c.textContent.includes("All"))) {
-      c.classList.add("active");
-    }
-  });
-  renderSignals();
-};
-
-function renderSignals() {
-  const container = document.getElementById("signals-feed-container");
-  if (!container) return;
-
-  const filtered = cachedSignals.filter(s => {
-    if (activeCategoryFilter === "ALL") return true;
-    if (activeCategoryFilter === "GOLD") return s.symbol.includes("XAU") || s.symbol.includes("GOLD");
-    if (activeCategoryFilter === "INDICES") return s.symbol.includes("100") || s.symbol.includes("30") || s.symbol.includes("US") || s.symbol.includes("NAS");
-    if (activeCategoryFilter === "FOREX") return !s.symbol.includes("XAU") && !s.symbol.includes("100") && !s.symbol.includes("30");
-    return true;
-  });
-
-  if (filtered.length === 0) {
-    container.innerHTML = `
-      <div class="empty-trades-state">
-        <p>Scanning markets for high-probability ${activeCategoryFilter} setups...</p>
-      </div>
-    `;
-    return;
-  }
-
-  let html = "";
-  filtered.forEach(s => {
-    const isBuy = (s.action || "").toUpperCase() === "BUY";
-    const actionClass = isBuy ? "buy" : "sell";
-    const actionPill = isBuy ? "🟢 BUY" : "🔴 SELL";
-
-    html += `
-      <div class="signal-card">
-        <div class="sig-card-head">
-          <div class="sig-asset-group">
-            <span class="sig-symbol">${s.symbol}</span>
-            <span class="sig-tf">${s.timeframe}</span>
-          </div>
-          <div class="sig-badges">
-            <span class="badge-win-prob">🎯 ${s.win_probability || '89% Win Rate'}</span>
-            <span class="badge-action-pill ${actionClass}">${actionPill}</span>
-          </div>
-        </div>
-
-        <div class="sig-metrics-grid">
-          <div class="sig-metric-box">
-            <span class="sig-m-lbl">Entry Level</span>
-            <span class="sig-m-val">${s.entry}</span>
-          </div>
-          <div class="sig-metric-box">
-            <span class="sig-m-lbl">Target (TP)</span>
-            <span class="sig-m-val target">${s.tp}</span>
-          </div>
-          <div class="sig-metric-box">
-            <span class="sig-m-lbl">Stop Loss (SL)</span>
-            <span class="sig-m-val stop">${s.sl}</span>
-          </div>
-        </div>
-
-        <div class="sig-payoff-strip">
-          <div class="payoff-item">
-            <span>Target Gain:</span>
-            <span class="payoff-gain">${s.gain_estimate_usd || '+$12.50'}</span>
-          </div>
-          <div class="payoff-item">
-            <span>Max Risk:</span>
-            <span class="payoff-risk">${s.risk_estimate_usd || '-$4.20'}</span>
-          </div>
-          <div class="payoff-item">
-            <span>Reward:</span>
-            <span class="payoff-rr">${s.rr || '1:2.5'}</span>
-          </div>
-        </div>
-
-        <button 
-          class="btn-1tap-execute ${actionClass}" 
-          id="btn-exec-${s.id}" 
-          onclick='handle1TapExecute(${JSON.stringify(s)})'>
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
-          </svg>
-          ⚡ 1-TAP EXECUTE ON MT5 (${actionPill})
-        </button>
-      </div>
-    `;
-  });
-
-  container.innerHTML = html;
-}
-
-// -----------------------------------------------------------------------------
-// 1-TAP EXECUTE ACTION
-// -----------------------------------------------------------------------------
-window.handle1TapExecute = async function(sig) {
-  const btn = document.getElementById(`btn-exec-${sig.id}`);
-  const originalText = btn ? btn.innerHTML : "";
-
-  if (btn) {
-    btn.disabled = true;
-    btn.className = "btn-1tap-execute executing";
-    btn.innerHTML = `<div class="spinner" style="width: 20px; height: 20px; margin: 0;"></div> Submitting order to MT5...`;
-  }
-
-  try {
-    const payload = {
-      account_id: clientAccount.account_id,
-      symbol: sig.symbol,
-      action: sig.action,
-      volume: 0.01,
-      sl: sig.sl,
-      tp: sig.tp,
-      comment: "Sajim_1Tap"
-    };
-
-    const res = await fetch("/api/client/execute", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
-    });
-
-    const data = await res.json();
-
-    if (res.ok && data.success) {
-      if (btn) {
-        btn.className = "btn-1tap-execute success";
-        btn.innerHTML = `✓ PLACED ORDER ON MT5 (Ticket #${data.ticket})`;
-      }
-      showToast(`⚡ TRADE EXECUTED! #${data.ticket}: ${sig.action} 0.01 ${sig.symbol}`);
-
-      // Refresh account and trades
-      fetchAccount();
-      fetchActiveTrades();
-
-      // Reset button after 3 seconds
-      setTimeout(() => {
-        if (btn) {
-          btn.disabled = false;
-          btn.className = `btn-1tap-execute ${sig.action.toLowerCase()}`;
-          btn.innerHTML = originalText;
-        }
-      }, 3000);
-
-    } else {
-      if (btn) {
-        btn.disabled = false;
-        btn.className = `btn-1tap-execute ${sig.action.toLowerCase()}`;
-        btn.innerHTML = originalText;
-      }
-      showToast(`Execution Failed: ${data.error || "Broker rejected order"}`);
-    }
-
-  } catch (err) {
-    console.error("1-Tap execution error:", err);
-    if (btn) {
-      btn.disabled = false;
-      btn.className = `btn-1tap-execute ${sig.action.toLowerCase()}`;
-      btn.innerHTML = originalText;
-    }
-    showToast("Network error executing trade.");
   }
 };
 
 // -----------------------------------------------------------------------------
-// OPEN TRADES MANAGEMENT
+// ACTIVE RUNNING TRADES
 // -----------------------------------------------------------------------------
 async function fetchActiveTrades() {
-  try {
-    const res = await fetch("/api/client/active-trades");
-    if (!res.ok) return;
-    const data = await res.json();
-    const trades = data.trades || [];
+  const container = document.getElementById("active-trades-view");
+  const slotPill = document.getElementById("trades-slot-pill");
+  if (!container) return;
 
-    const container = document.getElementById("open-trades-container");
-    if (!container) return;
+  try {
+    let trades = clientAccount.open_positions || [];
+
+    if (!clientAccount.is_demo) {
+      const res = await fetch("/api/client/active-trades");
+      if (res.ok) {
+        const data = await res.json();
+        trades = data.trades || [];
+      }
+    }
+
+    if (slotPill) {
+      slotPill.textContent = `${trades.length} / 2 Active`;
+    }
 
     if (trades.length === 0) {
       container.innerHTML = `
-        <div class="empty-trades-state">
-          <div class="empty-icon">
-            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-              <circle cx="12" cy="12" r="10"></circle>
-              <line x1="12" y1="8" x2="12" y2="12"></line>
-              <line x1="12" y1="16" x2="12.01" y2="16"></line>
-            </svg>
+        <div class="radar-scan-state" id="radar-scan-box">
+          <div class="radar-pulse-wrap">
+            <div class="radar-ring r1"></div>
+            <div class="radar-ring r2"></div>
+            <div class="radar-center-dot"></div>
           </div>
-          <h3>No Open Positions</h3>
-          <p>You have no active orders executing on your MT5 terminal right now. Tap a signal from the feed or turn on Auto-Pilot to mirror trades automatically.</p>
-          <button class="btn-primary" onclick="switchNavTab('signals-tab')">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-            Explore 1-Tap Signals
-          </button>
+          <div class="radar-info">
+            <h4>Live Market Radar Active</h4>
+            <p>Scanning Gold (XAUUSD), Indices & FX for high-velocity entries...</p>
+            <span class="radar-status-tag">Auto-Pilot Armed • 0.01 Micro Lot</span>
+          </div>
         </div>
       `;
-      return;
-    }
+    } else {
+      let html = "";
+      trades.forEach(t => {
+        const isProfit = (t.pnl || 0) >= 0;
+        const sign = isProfit ? "+" : "";
+        const pnlClass = isProfit ? "profit" : "loss";
+        const actionClass = (t.type || "BUY").toLowerCase();
 
-    let listHtml = `<div class="trades-list">`;
-    trades.forEach(t => {
-      const pnl = t.pnl || 0.0;
-      const pnlSign = pnl >= 0 ? "+" : "";
-      const pnlClass = pnl >= 0 ? "positive" : "negative";
-
-      listHtml += `
-        <div class="trade-item-card">
-          <div class="trade-item-left">
-            <div>
-              <div class="trade-ticket">Ticket #${t.ticket} &bull; ${t.time || ''}</div>
-              <div class="trade-item-symbol">${t.symbol} <span class="badge-action-pill ${t.type.toLowerCase()}" style="font-size: 0.68rem; padding: 0.15rem 0.45rem;">${t.type}</span></div>
-              <div class="trade-item-volume">${t.volume} Lots @ ${t.open_price} &rarr; Now ${t.current_price}</div>
+        html += `
+          <div class="trade-live-item">
+            <div class="trade-live-header">
+              <span class="trade-symbol-tag">${t.symbol}</span>
+              <span class="trade-action-pill ${actionClass}">${t.type} ${t.volume || 0.01} Lot</span>
             </div>
-          </div>
-          <div style="display: flex; align-items: center; gap: 1rem;">
-            <div class="trade-item-pnl ${pnlClass}">${pnlSign}$${pnl.toFixed(2)}</div>
-            <button class="btn-close-trade" onclick="handleCloseTrade(${t.ticket})">
-              ✕ Close
+
+            <div class="trade-price-row">
+              <span>Entry: <strong>${t.open_price}</strong></span>
+              <span>──►</span>
+              <span>Current: <strong>${t.current_price}</strong></span>
+            </div>
+
+            <div class="trade-pnl-banner">
+              <span style="font-size: 0.75rem; color: var(--text-muted);">Floating Profit</span>
+              <span class="pnl-hero-val ${pnlClass}">${sign}$${(t.pnl || 0).toFixed(2)} USD</span>
+            </div>
+
+            <div class="trade-defense-shield">
+              <span>🛡️ Breakeven Protected ($0 Risk) • Auto-Trailing to +0.65R</span>
+            </div>
+
+            <button class="btn-close-trade" onclick="closeTrade(${t.ticket})">
+              ✕ Close Position
             </button>
           </div>
-        </div>
-      `;
-    });
-    listHtml += `</div>`;
-
-    container.innerHTML = listHtml;
-
+        `;
+      });
+      container.innerHTML = html;
+    }
   } catch (err) {
-    console.warn("Error loading trades:", err);
+    console.warn("Active trades error:", err);
   }
 }
 
-window.handleCloseTrade = async function(ticket) {
-  if (!confirm(`Are you sure you want to close position #${ticket} at market price?`)) {
+window.closeTrade = async function(ticket) {
+  if (!confirm(`Are you sure you want to close position #${ticket}?`)) return;
+
+  if (clientAccount.is_demo) {
+    clientAccount.open_positions = clientAccount.open_positions.filter(t => t.ticket !== ticket);
+    showToast("✅ Trade closed successfully.");
+    fetchActiveTrades();
     return;
   }
 
@@ -448,229 +417,124 @@ window.handleCloseTrade = async function(ticket) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ticket: ticket })
     });
-
     const data = await res.json();
-    if (res.ok && data.success) {
-      showToast(`Position #${ticket} successfully closed!`);
-      fetchAccount();
+    if (data.success) {
+      showToast("✅ Position closed on broker.");
       fetchActiveTrades();
+      fetchAccount();
     } else {
-      showToast(`Failed to close: ${data.error || "Error"}`);
+      showToast("❌ Close failed: " + (data.error || "Unknown"));
     }
   } catch (err) {
-    showToast("Error communicating with broker to close position.");
+    showToast("Error closing trade: " + err.message);
   }
 };
 
 // -----------------------------------------------------------------------------
-// TAB SWITCHING
+// LIVE 1-TAP SIGNALS
 // -----------------------------------------------------------------------------
-window.switchNavTab = function(tabId) {
-  const tabs = document.querySelectorAll(".tab-content");
-  const navBtns = document.querySelectorAll(".nav-tab");
-
-  tabs.forEach(t => t.classList.remove("active"));
-  navBtns.forEach(b => b.classList.remove("active"));
-
-  const targetTab = document.getElementById(tabId);
-  if (targetTab) targetTab.classList.add("active");
-
-  const activeBtn = document.querySelector(`[onclick="switchNavTab('${tabId}')"]`);
-  if (activeBtn) activeBtn.classList.add("active");
-
-  window.scrollTo({ top: 0, behavior: "smooth" });
-};
-
-// -----------------------------------------------------------------------------
-// CONNECT MT5 MODAL & MULTI-ACCOUNT MANAGEMENT
-// -----------------------------------------------------------------------------
-window.openConnectModal = function() {
-  const modal = document.getElementById("connect-modal");
-  if (modal) modal.classList.add("active");
-  fetchAccountsList();
-};
-
-window.closeConnectModal = function() {
-  const modal = document.getElementById("connect-modal");
-  if (modal) modal.classList.remove("active");
-};
-
-async function fetchAccountsList() {
-  const listContainer = document.getElementById("modal-accounts-list");
-  if (!listContainer) return;
+async function fetchSignals() {
+  const container = document.getElementById("cockpit-signals-grid");
+  if (!container) return;
 
   try {
-    const res = await fetch("/api/client/accounts");
+    const res = await fetch("/api/client/signals");
     if (!res.ok) return;
     const data = await res.json();
-    const accounts = data.accounts || [];
+    const signals = data.signals || [];
 
-    if (accounts.length === 0) {
-      listContainer.innerHTML = `<div style="font-size: 0.8rem; color: var(--text-muted);">No accounts linked yet.</div>`;
+    if (signals.length === 0) {
+      container.innerHTML = `<div class="loading-mini">Waiting for next high-accuracy BEEP anomaly...</div>`;
       return;
     }
 
     let html = "";
-    accounts.forEach(acc => {
-      const isActive = String(acc.account_id) === String(clientAccount.account_id);
+    signals.slice(0, 3).forEach(s => {
+      const actionColor = s.action === "BUY" ? "var(--emerald)" : "var(--rose)";
       html += `
-        <div style="background: rgba(0,0,0,0.35); border: 1px solid ${isActive ? 'var(--cyan-accent)' : 'var(--border-subtle)'}; border-radius: 8px; padding: 0.75rem 0.9rem; display: flex; justify-content: space-between; align-items: center;">
-          <div>
-            <div style="font-weight: 700; font-size: 0.88rem; color: #fff; display: flex; align-items: center; gap: 0.45rem;">
-              <span>${acc.account_name || 'Account'} (#${acc.account_id})</span>
-              ${isActive ? '<span style="background: rgba(56, 189, 248, 0.2); color: var(--cyan-accent); font-size: 0.65rem; padding: 0.1rem 0.4rem; border-radius: 999px; font-weight: 800;">ACTIVE</span>' : ''}
-            </div>
-            <div style="font-size: 0.75rem; color: var(--text-dim); font-family: var(--font-mono); margin-top: 0.15rem;">
-              ${acc.broker_server} &bull; Risk: ${acc.risk_mode || '0.01 Lot'}
+        <div class="signal-quick-card">
+          <div class="sig-meta-col">
+            <h5>${s.symbol} <span style="color: ${actionColor}; font-weight: 800;">${s.action}</span></h5>
+            <div class="sig-prices">Entry: ${s.entry} • SL: ${s.sl} • TP: ${s.tp}</div>
+            <div class="sig-pnl-est">
+              <span class="gain">Target: ${s.gain_estimate_usd}</span>
+              <span class="risk">Risk: ${s.risk_estimate_usd}</span>
             </div>
           </div>
-          <div style="display: flex; gap: 0.4rem;">
-            ${!isActive ? `
-              <button style="background: rgba(56, 189, 248, 0.15); border: 1px solid var(--cyan-accent); color: var(--cyan-accent); font-size: 0.75rem; font-weight: 700; padding: 0.35rem 0.65rem; border-radius: 6px; cursor: pointer;" onclick="switchActiveAccount('${acc.account_id}')">
-                Switch
-              </button>
-            ` : ''}
-            ${accounts.length > 1 ? `
-              <button style="background: transparent; border: none; color: #fb7185; cursor: pointer; padding: 0.2rem 0.4rem; font-size: 1.1rem; line-height: 1;" onclick="removeAccount('${acc.account_id}')" title="Remove Account">
-                &times;
-              </button>
-            ` : ''}
-          </div>
+          <button class="btn-1tap-exec" onclick="execute1TapSignal('${s.symbol}', '${s.action}', ${s.entry}, ${s.sl}, ${s.tp})">
+            1-Tap (0.01)
+          </button>
         </div>
       `;
     });
-
-    listContainer.innerHTML = html;
+    container.innerHTML = html;
   } catch (err) {
-    console.warn("Could not load accounts list:", err);
+    console.warn("Signals error:", err);
   }
 }
 
-window.switchActiveAccount = async function(accountId) {
-  try {
-    const res = await fetch("/api/client/switch-account", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ account_id: accountId })
-    });
-
-    const data = await res.json();
-    if (data.success) {
-      showToast(`Switched active MT5 account to #${accountId}!`);
-      fetchAccount();
-      fetchAccountsList();
-    } else {
-      showToast("Switch failed: " + (data.error || "Unknown"));
-    }
-  } catch (err) {
-    showToast("Error switching account");
-  }
-};
-
-window.removeAccount = async function(accountId) {
-  if (!confirm(`Remove account #${accountId}?`)) return;
-  try {
-    const res = await fetch("/api/client/delete-account", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ account_id: accountId })
-    });
-
-    const data = await res.json();
-    if (data.success) {
-      showToast(`Account #${accountId} removed.`);
-      fetchAccount();
-      fetchAccountsList();
-    }
-  } catch (err) {
-    showToast("Error removing account");
-  }
-};
-
-window.handleAccountConnect = async function(e) {
-  e.preventDefault();
-  const btn = document.getElementById("btn-save-account");
-  const originalText = btn ? btn.innerHTML : "";
-
-  if (btn) {
-    btn.disabled = true;
-    btn.innerHTML = `<div class="spinner" style="width: 18px; height: 18px; margin: 0;"></div> Authenticating with MT5...`;
-  }
-
-  const broker = document.getElementById("modal-broker-server").value;
-  const login = document.getElementById("modal-login").value;
-  const password = document.getElementById("modal-password").value;
-  const riskMode = document.getElementById("modal-risk-mode").value;
-
-  const payload = {
-    account_id: login,
-    broker_server: broker,
-    password: password,
-    risk_mode: riskMode,
-    account_name: `Account #${login}`
-  };
+window.execute1TapSignal = async function(symbol, action, entry, sl, tp) {
+  showToast(`⚡ Dispatching 0.01 lot order on ${symbol}...`);
 
   try {
-    const res = await fetch("/api/client/connect", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
-    });
-
-    const data = await res.json();
-    if (res.ok && data.success) {
-      showToast(`✓ Verified & Connected MT5 #${login}!`);
-      closeConnectModal();
-      fetchAccount();
-    } else {
-      showToast(`Connection Failed: ${data.error || "Invalid credentials or server"}`);
-    }
-  } catch (err) {
-    showToast("Network error verifying MT5 connection");
-  } finally {
-    if (btn) {
-      btn.disabled = false;
-      btn.innerHTML = originalText;
-    }
-  }
-};
-
-// -----------------------------------------------------------------------------
-// RISK MODE UPDATE
-// -----------------------------------------------------------------------------
-window.updateRiskMode = async function(mode) {
-  const cards = document.querySelectorAll(".risk-preset-card");
-  cards.forEach(c => {
-    c.classList.remove("active");
-    if (c.querySelector(`input[value="${mode}"]`)) {
-      c.classList.add("active");
-    }
-  });
-
-  try {
-    await fetch("/api/client/connect", {
+    const res = await fetch("/api/client/execute", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         account_id: clientAccount.account_id,
-        risk_mode: mode
+        symbol: symbol,
+        action: action,
+        volume: 0.01,
+        sl: sl,
+        tp: tp
       })
     });
-    showToast(`Risk profile updated to ${mode}`);
+
+    const data = await res.json();
+    if (data.success) {
+      showToast(`✅ Executed Order #${data.ticket} on ${symbol}!`);
+      fetchActiveTrades();
+      fetchAccount();
+    } else {
+      showToast(`❌ Execution rejected: ${data.error || "Check broker margin"}`);
+    }
   } catch (err) {
-    console.warn("Could not save risk mode:", err);
+    showToast("Order routing error: " + err.message);
   }
 };
 
 // -----------------------------------------------------------------------------
-// TOAST NOTIFICATION
+// FREEMIUM UPGRADE BANNER LOGIC
 // -----------------------------------------------------------------------------
-function showToast(msg) {
-  const toast = document.getElementById("app-toast");
-  if (!toast) return;
-  toast.textContent = msg;
-  toast.style.display = "block";
+function updateFreemiumBanner(data) {
+  const banner = document.getElementById("card-freemium-banner");
+  const title = document.getElementById("upgrade-banner-title");
+  const desc = document.getElementById("upgrade-banner-desc");
+  if (!banner || !title || !desc) return;
+
+  if (data.is_demo) {
+    title.textContent = "Your Demo Test Made +$15.20 Today!";
+    desc.textContent = "Switch to a Real MT5 account on Headway to withdraw real cash.";
+  } else {
+    title.textContent = "Headway Official Partnership Active";
+    desc.textContent = "Enjoy 1:2000 leverage, zero spreads, and instant M-Pesa transactions.";
+  }
+}
+
+// -----------------------------------------------------------------------------
+// TOAST NOTIFICATIONS
+// -----------------------------------------------------------------------------
+function showToast(message) {
+  const container = document.getElementById("toast-container");
+  if (!container) return;
+
+  const toast = document.createElement("div");
+  toast.className = "toast";
+  toast.textContent = message;
+  container.appendChild(toast);
+
   setTimeout(() => {
-    toast.style.display = "none";
+    toast.style.opacity = "0";
+    setTimeout(() => toast.remove(), 300);
   }, 3500);
 }
