@@ -365,7 +365,9 @@ export default function Home() {
       {/* Screen 1: The Gate (unauthenticated) */}
       {!isAuthenticated ? (
         <GateScreen
+          onStartDemo={handleLaunchDemo}
           onLaunchDemo={handleLaunchDemo}
+          onOpenConnectModal={handleOpenConnectReal}
           onConnectReal={handleOpenConnectReal}
           affiliateLink="https://headway.partners/user/signup?hwp=b158cc"
         />
@@ -374,26 +376,35 @@ export default function Home() {
         <div className="flex-1 flex flex-col">
           {/* Fixed Header */}
           <CockpitHeader
+            account={telemetry}
             telemetry={telemetry}
+            onOpenConnectModal={() => setShowConnectorModal(true)}
             onOpenConnector={() => setShowConnectorModal(true)}
+            onExitToGate={() => {
+              setIsAuthenticated(false);
+              localStorage.removeItem("sajim_auth");
+            }}
           />
 
           {/* Main Cockpit Body */}
           <div className="flex-1 max-w-4xl w-full mx-auto px-4 py-6 space-y-6">
             {/* Balance & Today's Net Profit */}
-            <MetricHeroCard telemetry={telemetry} />
+            <MetricHeroCard account={telemetry} telemetry={telemetry} />
 
             {/* Master Auto-Pilot Toggle Button */}
             <MasterAutoPilotToggle
               enabled={telemetry.autopilot_enabled}
-              onToggle={handleToggleAutoPilot}
+              isDemo={Boolean(telemetry.is_demo)}
               riskMode={telemetry.risk_mode || "ULTRA_SAFE"}
               onChangeRisk={handleRiskChange}
+              onToggle={handleToggleAutoPilot}
             />
 
             {/* Active Trade or Radar Scanner */}
             <ActiveTradeCard
               trade={activeTrade}
+              trades={telemetry.open_positions || []}
+              onCloseTrade={handleClosePosition}
               onClosePosition={handleClosePosition}
               isClosing={isClosingTrade}
             />

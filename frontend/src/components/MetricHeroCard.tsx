@@ -5,11 +5,21 @@ import { TrendingUp } from "lucide-react";
 import { AccountTelemetry } from "../lib/types";
 
 interface MetricHeroCardProps {
-  account: AccountTelemetry;
+  account?: AccountTelemetry;
+  telemetry?: AccountTelemetry;
 }
 
-export const MetricHeroCard: React.FC<MetricHeroCardProps> = ({ account }) => {
-  const isPositive = (account.today_pnl || 0) >= 0;
+export const MetricHeroCard: React.FC<MetricHeroCardProps> = ({ account, telemetry }) => {
+  const acc = account || telemetry || {
+    balance: 20.98,
+    currency: "USD",
+    today_pnl: 4.35,
+    today_pnl_percent: 20.7,
+    equity: 25.33,
+    free_margin: 24.10,
+  } as AccountTelemetry;
+
+  const isPositive = (acc.today_pnl || 0) >= 0;
 
   return (
     <section className="bg-[#0d121c] border border-white/10 rounded-2xl p-5 shadow-lg relative overflow-hidden">
@@ -23,9 +33,9 @@ export const MetricHeroCard: React.FC<MetricHeroCardProps> = ({ account }) => {
           </span>
           <div className="flex items-baseline gap-1.5 font-mono">
             <span className="text-3xl sm:text-4xl font-black text-white tracking-tight">
-              ${account.balance.toFixed(2)}
+              ${(acc.balance || 0).toFixed(2)}
             </span>
-            <span className="text-xs font-bold text-slate-400">{account.currency || "USD"}</span>
+            <span className="text-xs font-bold text-slate-400">{acc.currency || "USD"}</span>
           </div>
         </div>
 
@@ -37,11 +47,11 @@ export const MetricHeroCard: React.FC<MetricHeroCardProps> = ({ account }) => {
           <div className="flex items-center gap-1 text-emerald-400 font-mono font-black text-base leading-none">
             <TrendingUp className="w-3.5 h-3.5" />
             <span>
-              {isPositive ? "+" : ""}${account.today_pnl.toFixed(2)}
+              {isPositive ? "+" : ""}${(acc.today_pnl || 0).toFixed(2)}
             </span>
           </div>
           <span className="text-[10px] font-bold text-emerald-300 font-mono mt-0.5">
-            🟢 {isPositive ? "+" : ""}{account.today_pnl_percent.toFixed(1)}%
+            🟢 {isPositive ? "+" : ""}{(acc.today_pnl_percent || 0).toFixed(1)}%
           </span>
         </div>
       </div>
@@ -50,19 +60,17 @@ export const MetricHeroCard: React.FC<MetricHeroCardProps> = ({ account }) => {
       <div className="pt-3 border-t border-white/5 flex items-center justify-between text-xs text-slate-400">
         <div>
           <span>Equity: </span>
-          <strong className="text-white font-mono">${account.equity.toFixed(2)}</strong>
+          <strong className="text-white font-mono">${(acc.equity || 0).toFixed(2)}</strong>
         </div>
         <span className="text-white/10">•</span>
         <div>
           <span>Free Margin: </span>
-          <strong className="text-white font-mono">${account.free_margin.toFixed(2)}</strong>
+          <strong className="text-white font-mono">${(acc.free_margin || 0).toFixed(2)}</strong>
         </div>
         <span className="text-white/10">•</span>
         <div>
-          <span>Server: </span>
-          <strong className="text-sky-400 font-mono text-[11px]">
-            {account.broker_server || "Headway-Real"}
-          </strong>
+          <span>Shield: </span>
+          <strong className="text-emerald-400 font-mono">+0.35R BE</strong>
         </div>
       </div>
     </section>

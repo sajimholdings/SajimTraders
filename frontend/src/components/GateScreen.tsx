@@ -5,14 +5,23 @@ import Image from "next/image";
 import { Zap, Rocket, ShieldCheck, ArrowRight, Lock, CheckCircle2 } from "lucide-react";
 
 interface GateScreenProps {
-  onStartDemo: () => void;
-  onOpenConnectModal: () => void;
+  onStartDemo?: () => void;
+  onLaunchDemo?: () => void;
+  onOpenConnectModal?: () => void;
+  onConnectReal?: () => void;
+  affiliateLink?: string;
 }
 
 export const GateScreen: React.FC<GateScreenProps> = ({
   onStartDemo,
+  onLaunchDemo,
   onOpenConnectModal,
+  onConnectReal,
+  affiliateLink = "https://headway.partners/user/signup?hwp=b158cc",
 }) => {
+  const handleDemo = onStartDemo || onLaunchDemo;
+  const handleConnect = onOpenConnectModal || onConnectReal;
+
   return (
     <section className="min-h-screen flex items-center justify-center px-4 py-8 relative">
       {/* Ambient background glow */}
@@ -52,8 +61,9 @@ export const GateScreen: React.FC<GateScreenProps> = ({
         {/* Primary Action Buttons */}
         <div className="flex flex-col gap-3 mb-6">
           <button
-            onClick={onStartDemo}
-            className="w-full flex items-center justify-center gap-3 p-4 rounded-xl bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 text-white font-bold text-base shadow-[0_4px_20px_rgba(16,185,129,0.4)] transition-all hover:-translate-y-0.5"
+            type="button"
+            onClick={handleDemo}
+            className="w-full flex items-center justify-center gap-3 p-4 rounded-xl bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 text-white font-bold text-base shadow-[0_4px_20px_rgba(16,185,129,0.4)] transition-all hover:-translate-y-0.5 active:scale-95 cursor-pointer"
           >
             <Rocket className="w-5 h-5" />
             <div className="text-left">
@@ -63,8 +73,9 @@ export const GateScreen: React.FC<GateScreenProps> = ({
           </button>
 
           <button
-            onClick={onOpenConnectModal}
-            className="w-full flex items-center justify-center gap-3 p-3.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-white font-semibold text-sm transition-all hover:-translate-y-0.5"
+            type="button"
+            onClick={handleConnect}
+            className="w-full flex items-center justify-center gap-3 p-3.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-white font-semibold text-sm transition-all hover:-translate-y-0.5 active:scale-95 cursor-pointer"
           >
             <Zap className="w-4 h-4 text-emerald-400" />
             <div className="text-left">
@@ -84,7 +95,7 @@ export const GateScreen: React.FC<GateScreenProps> = ({
             Don&apos;t have an MT5 account yet? Get 1:2000 leverage & instant M-Pesa deposits.
           </p>
           <a
-            href="https://headway.partners/user/signup?hwp=b158cc"
+            href={affiliateLink}
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex items-center justify-center gap-2 w-full py-2 px-3 bg-sky-500/15 hover:bg-sky-500/25 border border-sky-500/30 rounded-lg text-sky-300 text-xs font-bold transition-colors"
