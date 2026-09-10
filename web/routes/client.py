@@ -12,12 +12,17 @@ Handles:
 
 import os
 import json
+import sys
 import logging
 from datetime import datetime
 from web.routes.base import (
+    ROOT_DIR,
     load_json_safe,
     BROADCAST_ACTIVE_FILE,
 )
+
+if ROOT_DIR not in sys.path:
+    sys.path.insert(0, ROOT_DIR)
 
 logger = logging.getLogger("SajimWebClient")
 
