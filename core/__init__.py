@@ -26,30 +26,65 @@ try:
 except ImportError:
     BeepNarrativeEngine = None
 
-from .sajim_regime_algos import SajimExecutionSuite, AccountProfile
+try:
+    from .sajim_regime_algos import SajimExecutionSuite, AccountProfile
+except Exception:
+    SajimExecutionSuite, AccountProfile = None, None
 
 try:
     from .beep_binary_quant_engine import run_binary_quant_simulation
-except ImportError:
+except Exception:
     run_binary_quant_simulation = None
 
 try:
     from .tick_beep_engine import TickBeepEngine
-except ImportError:
+except Exception:
     TickBeepEngine = None
 
-from .backtester import BeepBacktester
-from .beep_matrix_scanner import BeepMatrixScanner
-from .mt5_bridge import MetaTraderBridge
-from .beep_broadcast import BeepBroadcastBus
-from .lot_calculator import UniversalLotCalculator
-from .app import SajimBeepClient, display_sammy_card
-from .api import BeepApiHandler
+try:
+    from .backtester import BeepBacktester
+except Exception:
+    BeepBacktester = None
+
+try:
+    from .beep_matrix_scanner import BeepMatrixScanner
+except Exception:
+    BeepMatrixScanner = None
+
+try:
+    from .mt5_bridge import MetaTraderBridge
+except Exception:
+    MetaTraderBridge = None
+
+try:
+    from .beep_broadcast import BeepBroadcastBus
+except Exception:
+    BeepBroadcastBus = None
+
+try:
+    from .lot_calculator import UniversalLotCalculator
+except Exception:
+    UniversalLotCalculator = None
+
+try:
+    from .app import SajimBeepClient, display_sammy_card
+except Exception:
+    SajimBeepClient, display_sammy_card = None, None
+
+try:
+    from .api import BeepApiHandler
+except Exception:
+    BeepApiHandler = None
 
 try:
     from .beep_processor import BeepProcessor, BeepSnipeFilter, BeepSnipeEvaluation
-except ImportError:
+except Exception:
     BeepProcessor, BeepSnipeFilter, BeepSnipeEvaluation = None, None, None
+
+try:
+    from .multi_account_manager import MultiAccountManager, get_multi_account_manager
+except Exception:
+    MultiAccountManager, get_multi_account_manager = None, None
 
 __all__ = [
     "BeepCoreEngine",
@@ -67,4 +102,6 @@ __all__ = [
     "BeepProcessor",
     "BeepSnipeFilter",
     "BeepSnipeEvaluation",
+    "MultiAccountManager",
+    "get_multi_account_manager",
 ]

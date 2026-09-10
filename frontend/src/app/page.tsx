@@ -135,6 +135,7 @@ const SEED_SIGNALS: ClientSignal[] = [
 ];
 
 export default function Home() {
+  const [isMounted, setIsMounted] = useState<boolean>(false);
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [showConnectorModal, setShowConnectorModal] = useState<boolean>(false);
   const [showAuthModal, setShowAuthModal] = useState<boolean>(false);
@@ -144,6 +145,7 @@ export default function Home() {
   const [signals, setSignals] = useState<ClientSignal[]>(SEED_SIGNALS);
   const [isClosingTrade, setIsClosingTrade] = useState<boolean>(false);
   const [isExecutingSignal, setIsExecutingSignal] = useState<boolean>(false);
+  const [isTogglingAutoPilot, setIsTogglingAutoPilot] = useState<boolean>(false);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [gateStats, setGateStats] = useState<{ total_pnl: number; total_trades: number; win_rate: number } | null>(null);
@@ -175,6 +177,8 @@ export default function Home() {
       }
     } catch {
       // Ignore localStorage errors
+    } finally {
+      setIsMounted(true);
     }
   }, []);
 
@@ -329,7 +333,10 @@ export default function Home() {
 
   // Toggle Auto-Pilot
   const handleToggleAutoPilot = async () => {
-    const nextState = !telemetry.autopilot_enabled;
+    if (isTogglingAutoPilot) return;
+    setIsTogglingAutoPilot(true);
+    const prevState = telemetry.autopilot_enabled;
+    const nextState = !prevState;
     setTelemetry((prev) => ({ ...prev, autopilot_enabled: nextState }));
     trackAction("TOGGLE_AUTOPILOT", { enabled: nextState });
 
@@ -342,23 +349,43 @@ export default function Home() {
           enabled: nextState,
         }),
       });
-      if (res.ok) {
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.success !== false) {
         showToast(
           nextState
             ? "⚡ Auto-Pilot Activated: BEEP Engine scanning markets"
             : "⏸️ Auto-Pilot Paused: Manual oversight mode"
         );
+      } else {
+        setTelemetry((prev) => ({ ...prev, autopilot_enabled: prevState }));
+        showToast("❌ Auto-Pilot error: " + (data.error || "Server rejected toggle"));
       }
     } catch {
-      showToast(nextState ? "⚡ Auto-Pilot Activated" : "⏸️ Auto-Pilot Paused");
+      setTelemetry((prev) => ({ ...prev, autopilot_enabled: prevState }));
+      showToast("❌ Network error toggling Auto-Pilot");
+    } finally {
+      setIsTogglingAutoPilot(false);
     }
   };
 
   // Change Risk Mode
-  const handleRiskChange = (mode: string) => {
-    setTelemetry((prev) => ({ ...prev, risk_mode: mode }));
+  const handleRiskChange = async (mode: string) => {
+    const updated = { ...telemetry, risk_mode: mode };
+    setTelemetry(updated);
+    localStorage.setItem("sajim_active_account", JSON.stringify(updated));
     trackAction("CHANGE_RISK_MODE", { mode });
     showToast(`🛡️ Risk Mode updated: ${mode.replace("_", " ")}`);
+
+    // Sync to backend
+    fetch("/api/client/connect", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        account_id: telemetry.account_id,
+        broker_server: telemetry.broker_server,
+        risk_mode: mode,
+      }),
+    }).catch(() => {});
   };
 
   // Close Active Position
@@ -371,19 +398,19 @@ export default function Home() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ticket }),
       });
-      showToast(`✅ Trade #${ticket} closed successfully`);
-      setTelemetry((prev) => ({
-        ...prev,
-        open_positions: prev.open_positions.filter((p) => p.ticket !== ticket),
-        floating_pnl: 0,
-      }));
-    } catch {
-      setTelemetry((prev) => ({
-        ...prev,
-        open_positions: prev.open_positions.filter((p) => p.ticket !== ticket),
-        floating_pnl: 0,
-      }));
-      showToast(`✅ Trade #${ticket} closed`);
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.success) {
+        showToast(`✅ Trade #${ticket} closed successfully`);
+        setTelemetry((prev) => ({
+          ...prev,
+          open_positions: prev.open_positions.filter((p) => p.ticket !== ticket),
+          floating_pnl: 0,
+        }));
+      } else {
+        showToast(`❌ Failed to close Trade #${ticket}: ` + (data.error || "Broker rejected close"));
+      }
+    } catch (err: any) {
+      showToast(`❌ Network error closing Trade #${ticket}: ` + err.message);
     } finally {
       setIsClosingTrade(false);
     }
@@ -399,7 +426,7 @@ export default function Home() {
       is_demo: telemetry.is_demo,
     });
     try {
-      await fetch("/api/client/execute", {
+      const res = await fetch("/api/client/execute", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -413,30 +440,63 @@ export default function Home() {
         }),
       });
 
-      const newPosition: ClientTrade = {
-        ticket: Math.floor(1000000 + Math.random() * 9000000),
-        symbol: signal.symbol,
-        type: signal.action,
-        volume: telemetry.is_demo ? 0.05 : 0.01,
-        open_price: signal.entry,
-        current_price: signal.entry,
-        sl: signal.sl,
-        tp: signal.tp,
-        pnl: 0.0,
-        time: new Date().toLocaleTimeString(),
-        comment: "BEEP_1TAP",
-      };
+      const data = await res.json().catch(() => ({}));
 
-      setTelemetry((prev) => ({
-        ...prev,
-        open_positions: [newPosition, ...(prev.open_positions || [])],
-      }));
+      if (res.ok && data.success) {
+        const newPosition: ClientTrade = {
+          ticket: data.ticket || Math.floor(1000000 + Math.random() * 9000000),
+          symbol: signal.symbol,
+          type: signal.action,
+          volume: data.volume || (telemetry.is_demo ? 0.05 : 0.01),
+          open_price: data.price || signal.entry,
+          current_price: data.price || signal.entry,
+          sl: signal.sl,
+          tp: signal.tp,
+          pnl: 0.0,
+          time: new Date().toLocaleTimeString(),
+          comment: "BEEP_1TAP",
+        };
 
-      showToast(`🚀 1-Tap Order Placed: ${signal.action} ${signal.symbol} @ ${signal.entry}`);
-      return true;
-    } catch {
-      showToast(`🚀 1-Tap Order Placed: ${signal.action} ${signal.symbol}`);
-      return true;
+        setTelemetry((prev) => ({
+          ...prev,
+          open_positions: [newPosition, ...(prev.open_positions || [])],
+        }));
+
+        showToast(`🚀 1-Tap Order Filled: ${signal.action} ${signal.symbol} (Ticket #${newPosition.ticket})`);
+        return true;
+      } else if (telemetry.is_demo) {
+        // Fallback simulation specifically for guest demo
+        const demoTicket = Math.floor(1000000 + Math.random() * 9000000);
+        const newPosition: ClientTrade = {
+          ticket: demoTicket,
+          symbol: signal.symbol,
+          type: signal.action,
+          volume: 0.05,
+          open_price: signal.entry,
+          current_price: signal.entry,
+          sl: signal.sl,
+          tp: signal.tp,
+          pnl: 0.0,
+          time: new Date().toLocaleTimeString(),
+          comment: "DEMO_1TAP",
+        };
+        setTelemetry((prev) => ({
+          ...prev,
+          open_positions: [newPosition, ...(prev.open_positions || [])],
+        }));
+        showToast(`🚀 [Demo] 1-Tap Order Filled: ${signal.action} ${signal.symbol}`);
+        return true;
+      } else {
+        showToast(`❌ 1-Tap Execution Failed: ${data.error || "Broker rejected order"}`);
+        return false;
+      }
+    } catch (err: any) {
+      if (telemetry.is_demo) {
+        showToast(`🚀 [Demo] 1-Tap Order Placed: ${signal.action} ${signal.symbol}`);
+        return true;
+      }
+      showToast(`❌ Execution error reaching broker: ${err.message}`);
+      return false;
     } finally {
       setIsExecutingSignal(false);
     }
@@ -444,17 +504,20 @@ export default function Home() {
 
   // Account connected from Modal
   const handleAccountConnected = (account: Partial<AccountTelemetry>) => {
+    const isDemo = Boolean(account.is_demo);
     const updated: AccountTelemetry = {
       ...telemetry,
       ...account,
       terminal_connected: true,
-      today_pnl: account.is_demo ? 84.35 : 4.35,
-      today_pnl_percent: account.is_demo ? 0.84 : 20.73,
-      balance: account.is_demo ? 10000.0 : account.balance || 20.98,
-      equity: account.is_demo ? 10084.35 : account.equity || 25.33,
-      open_positions: account.is_demo
+      today_pnl: isDemo ? 84.35 : (account.today_pnl !== undefined ? account.today_pnl : 0.0),
+      today_pnl_percent: isDemo ? 0.84 : (account.today_pnl_percent !== undefined ? account.today_pnl_percent : 0.0),
+      balance: isDemo ? 10000.0 : (account.balance !== undefined ? account.balance : 0.0),
+      equity: isDemo ? 10084.35 : (account.equity !== undefined ? account.equity : 0.0),
+      free_margin: isDemo ? 9950.0 : (account.free_margin !== undefined ? account.free_margin : 0.0),
+      account_name: account.account_name || telemetry.account_name,
+      open_positions: isDemo
         ? INITIAL_DEMO_TELEMETRY.open_positions
-        : INITIAL_REAL_TELEMETRY.open_positions,
+        : account.open_positions || [],
     };
     setTelemetry(updated);
     setIsAuthenticated(true);
@@ -499,6 +562,10 @@ export default function Home() {
     }
   };
 
+  if (!isMounted) {
+    return <div className="min-h-screen bg-black" />;
+  }
+
   return (
     <div className="min-h-screen bg-black text-gray-50 flex flex-col font-sans selection:bg-green-500 selection:text-black">
       {/* Floating Bottom Toast Notification */}
@@ -528,6 +595,10 @@ export default function Home() {
               setIsAuthenticated(false);
               localStorage.removeItem("sajim_auth");
               localStorage.removeItem("sajim_active_account");
+              localStorage.removeItem("sajim_user");
+              setTelemetry(EMPTY_ACCOUNT_TELEMETRY);
+              setSignals(SEED_SIGNALS);
+              showToast("👋 Signed out successfully");
             }}
           />
 
@@ -593,6 +664,8 @@ export default function Home() {
         onClose={() => setShowConnectorModal(false)}
         onConnectSuccess={handleAccountConnected}
         initialTab={connectorInitialTab}
+        currentAccountId={telemetry.account_id}
+        currentServer={telemetry.broker_server}
         affiliateLink="https://headway.partners/user/signup?hwp=b158cc"
       />
 

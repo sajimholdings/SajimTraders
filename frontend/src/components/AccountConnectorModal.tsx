@@ -1,13 +1,16 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { X, ArrowRight, Zap, Shield } from "lucide-react";
+import { supabase } from "../lib/supabase";
 
 interface AccountConnectorModalProps {
   isOpen: boolean;
   onClose: () => void;
   onConnectSuccess: (accountData: any) => void;
   initialTab?: "DEMO" | "REAL" | "demo" | "real";
+  currentAccountId?: string;
+  currentServer?: string;
   affiliateLink?: string;
 }
 
@@ -16,15 +19,43 @@ export const AccountConnectorModal: React.FC<AccountConnectorModalProps> = ({
   onClose,
   onConnectSuccess,
   initialTab = "DEMO",
+  currentAccountId,
+  currentServer,
   affiliateLink = "https://headway.partners/user/signup?hwp=b158cc",
 }) => {
   const normalizedInitial = initialTab.toUpperCase() as "DEMO" | "REAL";
   const [activeTab, setActiveTab] = useState<"DEMO" | "REAL">(normalizedInitial);
-  const [server, setServer] = useState(normalizedInitial === "DEMO" ? "Headway-Demo" : "Headway-Real");
-  const [login, setLogin] = useState(normalizedInitial === "DEMO" ? "1200442972" : "");
+  const [server, setServer] = useState(
+    currentServer || (normalizedInitial === "DEMO" ? "Headway-Demo" : "Headway-Real")
+  );
+  const [login, setLogin] = useState(
+    currentAccountId && currentAccountId !== "NEW"
+      ? currentAccountId
+      : normalizedInitial === "DEMO"
+      ? "1200442972"
+      : ""
+  );
   const [password, setPassword] = useState(normalizedInitial === "DEMO" ? "demo1234" : "");
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
+
+  // Synchronize state when modal opens or initialTab / currentAccount changes
+  useEffect(() => {
+    if (isOpen) {
+      const tab = initialTab.toUpperCase() as "DEMO" | "REAL";
+      setActiveTab(tab);
+      setErrorMsg("");
+      if (tab === "DEMO") {
+        setServer("Headway-Demo");
+        setLogin(currentAccountId && currentAccountId.startsWith("DEMO-") ? currentAccountId : "1200442972");
+        setPassword("demo1234");
+      } else {
+        setServer(currentServer && currentServer !== "None" ? currentServer : "Headway-Real");
+        setLogin(currentAccountId && currentAccountId !== "NEW" && !currentAccountId.startsWith("DEMO-") ? currentAccountId : "");
+        setPassword("");
+      }
+    }
+  }, [isOpen, initialTab, currentAccountId, currentServer]);
 
   if (!isOpen) return null;
 
@@ -36,8 +67,8 @@ export const AccountConnectorModal: React.FC<AccountConnectorModalProps> = ({
       setLogin("1200442972");
       setPassword("demo1234");
     } else {
-      setServer("Headway-Real");
-      setLogin("");
+      setServer(currentServer && currentServer !== "None" ? currentServer : "Headway-Real");
+      setLogin(currentAccountId && currentAccountId !== "NEW" && !currentAccountId.startsWith("DEMO-") ? currentAccountId : "");
       setPassword("");
     }
   };
@@ -85,6 +116,21 @@ export const AccountConnectorModal: React.FC<AccountConnectorModalProps> = ({
 
       const data = await res.json();
       if (data.success) {
+        try {
+          const storedUser = localStorage.getItem("sajim_user");
+          if (storedUser) {
+            const parsedUser = JSON.parse(storedUser);
+            if (parsedUser.id) {
+              supabase.connectTradingAccount(parsedUser.id, {
+                account_id: login,
+                broker_server: server,
+                is_demo: false,
+                risk_mode: "ULTRA_SAFE",
+              }).catch(() => {});
+            }
+          }
+        } catch {}
+
         onConnectSuccess(data.account || { account_id: login, broker_server: server, is_demo: false });
         onClose();
       } else {

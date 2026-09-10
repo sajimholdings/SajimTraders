@@ -11,7 +11,12 @@ Supports: Cent Accounts (USC), Standard Accounts (USD), Micro/Pro Accounts (1:30
 
 import math
 from typing import Tuple, Dict, Any, Optional
-import MetaTrader5 as mt5
+try:
+    import MetaTrader5 as mt5
+    MT5_AVAILABLE = True
+except ImportError:
+    mt5 = None
+    MT5_AVAILABLE = False
 
 
 class UniversalLotCalculator:
@@ -35,6 +40,25 @@ class UniversalLotCalculator:
           Point Value ($ per point move per 1.0 Lot) = TickVal / TickSize
           Raw Lot = Risk Cash / (Stop Distance * Point Value)
         """
+        if not MT5_AVAILABLE or mt5 is None:
+            stop_dist = max(1e-5, abs(entry_price - stop_price))
+            risk_cash = equity * risk_fraction
+            raw_lot = risk_cash / max(1e-6, (stop_dist * 1.0))
+            clean_lot = max(0.01, min(0.05, round(raw_lot, 2)))
+            actual_risk = clean_lot * stop_dist
+            specs = {
+                "tick_val": 1.0,
+                "tick_size": 0.00001,
+                "point_val": 1.0,
+                "vol_min": 0.01,
+                "vol_step": 0.01,
+                "vol_max": 100.0,
+                "target_risk_cash": round(risk_cash, 2),
+                "actual_risk_cash": round(actual_risk, 2),
+                "actual_risk_pct": round((actual_risk / equity) * 100.0, 2) if equity > 0 else 0.0,
+            }
+            return clean_lot, actual_risk, specs
+
         symbol_info = mt5.symbol_info(symbol)
         if symbol_info is None:
             raise ValueError(f"Symbol {symbol} info not found on broker.")
