@@ -49,6 +49,39 @@ class SupabaseClient {
     return res.json();
   }
 
+  // Auth: Sign In with OAuth (Google)
+  signInWithOAuth(provider: "google" | "github" = "google", redirectTo?: string) {
+    if (typeof window === "undefined") return;
+    const targetRedirect = redirectTo || window.location.origin;
+    const authUrl = `${this.url}/auth/v1/authorize?provider=${provider}&redirect_to=${encodeURIComponent(targetRedirect)}`;
+    window.location.href = authUrl;
+  }
+
+  // Auth: Fetch User Info from JWT
+  async getUser(token: string) {
+    try {
+      const res = await fetch(`${this.url}/auth/v1/user`, {
+        headers: this.headers(token),
+      });
+      if (!res.ok) return null;
+      return await res.json();
+    } catch {
+      return null;
+    }
+  }
+
+  // Auth: Sign Out
+  async signOut(token?: string) {
+    try {
+      await fetch(`${this.url}/auth/v1/logout`, {
+        method: "POST",
+        headers: this.headers(token),
+      });
+    } catch {
+      // Ignore
+    }
+  }
+
   // Database: Fetch Active Signals
   async getActiveSignals(token?: string) {
     try {

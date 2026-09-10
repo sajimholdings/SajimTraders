@@ -11,6 +11,8 @@ import { RiskModeSheet } from "../components/RiskModeSheet";
 import { AccountConnectorModal } from "../components/AccountConnectorModal";
 import { FreemiumBanner } from "../components/FreemiumBanner";
 import { AccountTelemetry, ClientSignal, ClientTrade } from "../lib/types";
+import { trackAction } from "../lib/logger";
+import { supabase } from "../lib/supabase";
 
 const INITIAL_DEMO_TELEMETRY: AccountTelemetry = {
   account_id: "DEMO-884920",
@@ -156,6 +158,39 @@ export default function Home() {
     }
   }, []);
 
+  // Listen for Supabase Google OAuth callback tokens in URL hash (#access_token=...)
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const hash = window.location.hash;
+    if (hash && hash.includes("access_token=")) {
+      trackAction("OAUTH_CALLBACK_DETECTED");
+      const params = new URLSearchParams(hash.replace(/^#/, ""));
+      const accessToken = params.get("access_token");
+      if (accessToken) {
+        supabase.getUser(accessToken).then((user) => {
+          if (user) {
+            const userEmail = user.email || "";
+            const userName = user.user_metadata?.full_name || userEmail.split("@")[0] || "Trader";
+            const authAccount: AccountTelemetry = {
+              ...INITIAL_REAL_TELEMETRY,
+              account_name: userName,
+              account_id: user.id.slice(0, 8),
+              is_demo: false,
+            };
+            setTelemetry(authAccount);
+            setIsAuthenticated(true);
+            localStorage.setItem("sajim_auth", "true");
+            localStorage.setItem("sajim_active_account", JSON.stringify(authAccount));
+            localStorage.setItem("sajim_supabase_token", accessToken);
+            showToast(`🎉 Welcome, ${userName}! Signed in via Google`);
+            trackAction("GOOGLE_SIGNIN_SUCCESS", { email: userEmail, id: user.id });
+            window.history.replaceState(null, "", window.location.pathname);
+          }
+        });
+      }
+    }
+  }, []);
+
   // Fetch gate stats on load
   useEffect(() => {
     async function loadGateStats() {
@@ -184,12 +219,21 @@ export default function Home() {
       const res = await fetch("/api/client/account");
       if (res.ok) {
         const data = await res.json();
-        setTelemetry((prev) => ({
-          ...prev,
-          ...data,
-          today_pnl: data.today_pnl ?? prev.today_pnl,
-          today_pnl_percent: data.today_pnl_percent ?? prev.today_pnl_percent,
-        }));
+        setTelemetry((prev) => {
+          // CRITICAL FIX: If user is running Demo, PRESERVE virtual $10,000 capital and do not overwrite with real MT5 $20!
+          if (prev.is_demo) {
+            return {
+              ...prev,
+              terminal_connected: data.terminal_connected ?? prev.terminal_connected,
+            };
+          }
+          return {
+            ...prev,
+            ...data,
+            today_pnl: data.today_pnl ?? prev.today_pnl,
+            today_pnl_percent: data.today_pnl_percent ?? prev.today_pnl_percent,
+          };
+        });
       }
     } catch {
       // Fallback to current telemetry
@@ -226,6 +270,7 @@ export default function Home() {
   // Handle Manual Refresh
   const handleManualRefresh = async () => {
     setIsRefreshing(true);
+    trackAction("MANUAL_SYNC_TRIGGERED");
     await Promise.all([fetchTelemetry(), fetchSignals()]);
     setTimeout(() => {
       setIsRefreshing(false);
@@ -241,10 +286,18 @@ export default function Home() {
     localStorage.setItem("sajim_auth", "true");
     localStorage.setItem("sajim_active_account", JSON.stringify(demoData));
     showToast("🎉 Free Demo Cockpit Activated ($10,000 USD virtual equity)");
+    trackAction("CLICK_START_DEMO", { balance: 10000, is_demo: true });
+  };
+
+  // Handle Google OAuth Sign-in
+  const handleGoogleSignIn = () => {
+    trackAction("CLICK_GOOGLE_AUTH");
+    supabase.signInWithOAuth("google");
   };
 
   // Handle Real Account Connect Modal
   const handleOpenConnectReal = () => {
+    trackAction("OPEN_CONNECT_MODAL");
     setConnectorInitialTab("real");
     setShowConnectorModal(true);
   };
@@ -253,6 +306,7 @@ export default function Home() {
   const handleToggleAutoPilot = async () => {
     const nextState = !telemetry.autopilot_enabled;
     setTelemetry((prev) => ({ ...prev, autopilot_enabled: nextState }));
+    trackAction("TOGGLE_AUTOPILOT", { enabled: nextState });
 
     try {
       const res = await fetch("/api/client/toggle-autopilot", {
@@ -278,12 +332,14 @@ export default function Home() {
   // Change Risk Mode
   const handleRiskChange = (mode: string) => {
     setTelemetry((prev) => ({ ...prev, risk_mode: mode }));
+    trackAction("CHANGE_RISK_MODE", { mode });
     showToast(`🛡️ Risk Mode updated: ${mode.replace("_", " ")}`);
   };
 
   // Close Active Position
   const handleClosePosition = async (ticket: number) => {
     setIsClosingTrade(true);
+    trackAction("CLOSE_POSITION", { ticket });
     try {
       const res = await fetch("/api/client/close-trade", {
         method: "POST",
@@ -311,6 +367,12 @@ export default function Home() {
   // Execute 1-Tap Signal
   const handleExecuteSignal = async (signal: ClientSignal): Promise<boolean> => {
     setIsExecutingSignal(true);
+    trackAction("EXECUTE_1TAP_SIGNAL", {
+      symbol: signal.symbol,
+      action: signal.action,
+      entry: signal.entry,
+      is_demo: telemetry.is_demo,
+    });
     try {
       await fetch("/api/client/execute", {
         method: "POST",
@@ -375,6 +437,11 @@ export default function Home() {
     localStorage.setItem("sajim_active_account", JSON.stringify(updated));
     setShowConnectorModal(false);
     showToast(`🤝 Connected: ${updated.broker_server} (#${updated.account_id})`);
+    trackAction("ACCOUNT_CONNECTED", {
+      broker: updated.broker_server,
+      id: updated.account_id,
+      is_demo: updated.is_demo,
+    });
   };
 
   const handleScrollToSignals = () => {
@@ -397,6 +464,7 @@ export default function Home() {
         <GateScreen
           onLaunchDemo={handleLaunchDemo}
           onConnectReal={handleOpenConnectReal}
+          onGoogleSignIn={handleGoogleSignIn}
           affiliateLink="https://headway.partners/user/signup?hwp=b158cc"
           liveStats={gateStats}
         />

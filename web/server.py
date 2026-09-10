@@ -150,6 +150,8 @@ class SajimTradersHandler(SimpleHTTPRequestHandler, ClientRoutesMixin, AdminRout
             self.handle_client_toggle_autopilot(body)
         elif path == "/api/client/close-trade":
             self.handle_client_close_trade(body)
+        elif path == "/api/client/log":
+            self.handle_client_log(body)
 
         # Admin Actions
         elif path == "/api/sammy-check":

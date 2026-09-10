@@ -249,3 +249,22 @@ class ClientRoutesMixin:
         res = account_manager.close_position_by_ticket(ticket)
         status_code = 200 if res.get("success") else 400
         self._send_json(res, status_code=status_code)
+
+    def handle_client_log(self, body: dict):
+        """Logs user interactions, clicks, and client events to logs/client_actions.log."""
+        event_name = body.get("event", "UNKNOWN_EVENT")
+        details = body.get("details", {})
+        timestamp = body.get("timestamp", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+        client_ip = self.address_string()
+
+        log_line = f"[{timestamp}] [{client_ip}] [EVENT: {event_name}] {json.dumps(details)}\n"
+        log_path = os.path.join(ROOT_DIR, "logs", "client_actions.log")
+        os.makedirs(os.path.dirname(log_path), exist_ok=True)
+        try:
+            with open(log_path, "a", encoding="utf-8") as f:
+                f.write(log_line)
+        except Exception as e:
+            logger.warning(f"Could not write to client_actions.log: {e}")
+
+        print(f"👉 [USER_ACTION] {event_name} from {client_ip} -> {json.dumps(details)}")
+        self._send_json({"success": True, "event": event_name})
