@@ -184,7 +184,7 @@ class ClientRoutesMixin:
         client_signals = []
         seen = set()
 
-        for b in broadcast_list[:30]:
+        for b in list(reversed(broadcast_list))[:30]:
             symbol = b.get("symbol")
             action = b.get("action")
             if not symbol or not action:

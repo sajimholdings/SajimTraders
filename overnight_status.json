@@ -1,16 +1,14 @@
 {
-  "timestamp": "2026-09-09 15:48:25",
+  "timestamp": "2026-09-10 07:39:28",
   "pipeline": "DATA -> BEEP -> SIGNAL -> SAJIM -> ENTRY -> MANAGEMENT -> PNL",
   "server": "Headway-Real",
   "account": 17537803,
-  "equity": 137.54,
-  "balance": 133.53,
-  "free_margin": 131.62,
+  "equity": 25.07,
+  "balance": 28.8,
+  "free_margin": 17.71,
   "active_bot_positions": 0,
   "consecutive_wins": 0,
-  "cluster_streaks": {
-    "JPY": 0
-  },
+  "cluster_streaks": {},
   "total_trades": 0,
   "active_signals_count": 0,
   "top_signals": [],
