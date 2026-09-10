@@ -22,7 +22,7 @@ COEXISTENCE_STATUS_FILE = os.path.join(ROOT_DIR, "logs", "coexistence_status.jso
 OVERNIGHT_STATUS_FILE = os.path.join(ROOT_DIR, "logs", "overnight_telemetry.json")
 CIRCUIT_BREAKER_FILE = os.path.join(ROOT_DIR, "logs", "circuit_breaker_status.json")
 SIGNALS_FILE = os.path.join(ROOT_DIR, "logs", "live_signals.json")
-BROADCAST_ACTIVE_FILE = os.path.join(ROOT_DIR, "logs", "active_broadcasts.json")
+BROADCAST_ACTIVE_FILE = os.path.join(ROOT_DIR, "broadcast_active.json")
 GRAND_CONFLUENCE_AUDIT = os.path.join(ROOT_DIR, "logs", "grand_confluence_audit.json")
 COMMUNITY_STATE_FILE = os.path.join(ROOT_DIR, "logs", "community_concierge_state.json")
 EXPECTANCY_EDGE_FILE = os.path.join(ROOT_DIR, "logs", "quant_expectancy_report.json")
@@ -34,7 +34,11 @@ def load_json_safe(path: str, default: any = None) -> any:
     if default is None:
         default = {}
     if not os.path.exists(path):
-        return default
+        alt_path = os.path.join(ROOT_DIR, os.path.basename(path))
+        if os.path.exists(alt_path):
+            path = alt_path
+        else:
+            return default
     try:
         with open(path, "r", encoding="utf-8") as f:
             return json.load(f)

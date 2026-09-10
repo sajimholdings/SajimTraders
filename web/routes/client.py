@@ -379,6 +379,16 @@ class ClientRoutesMixin:
         if not account_id:
             self._send_json({"success": False, "error": "account_id is required"}, 400)
             return
+
+        # If bridge includes live market signals from the BEEP engine, cache them for client_signals
+        if "signals" in body and isinstance(body["signals"], list) and len(body["signals"]) > 0:
+            try:
+                os.makedirs(os.path.dirname(BROADCAST_ACTIVE_FILE), exist_ok=True)
+                with open(BROADCAST_ACTIVE_FILE, "w", encoding="utf-8") as f:
+                    json.dump(body["signals"], f, indent=2)
+            except Exception as e:
+                logger.warning(f"Could not persist bridge signals: {e}")
+
         res = mgr.update_account_telemetry(account_id, body)
         self._send_json(res)
 

@@ -97,43 +97,6 @@ const EMPTY_ACCOUNT_TELEMETRY: AccountTelemetry = {
   is_demo: false,
 };
 
-const SEED_SIGNALS: ClientSignal[] = [
-  {
-    id: "SIG_XAU_01",
-    symbol: "XAUUSD",
-    timeframe: "M1",
-    action: "BUY",
-    entry: 2684.5,
-    sl: 2679.5,
-    tp: 2698.0,
-    rr: "1:2.7",
-    strategy: "Kinetic Micro-Surge",
-    phase: "YOUNG_SURGE",
-    win_probability: "88.4%",
-    gain_estimate_usd: "+$13.50",
-    risk_estimate_usd: "-$5.00",
-    timestamp: "14:30:10",
-    one_tap_ready: true,
-  },
-  {
-    id: "SIG_EUR_02",
-    symbol: "EURUSD",
-    timeframe: "M5",
-    action: "SELL",
-    entry: 1.0842,
-    sl: 1.0858,
-    tp: 1.0805,
-    rr: "1:2.3",
-    strategy: "Liquidity Sweep Mirage",
-    phase: "INSTITUTIONAL_SWEEP",
-    win_probability: "84.9%",
-    gain_estimate_usd: "+$8.20",
-    risk_estimate_usd: "-$3.50",
-    timestamp: "14:28:45",
-    one_tap_ready: true,
-  },
-];
-
 export default function Home() {
   const [isMounted, setIsMounted] = useState<boolean>(false);
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
@@ -142,7 +105,7 @@ export default function Home() {
   const [showRiskSheet, setShowRiskSheet] = useState<boolean>(false);
   const [connectorInitialTab, setConnectorInitialTab] = useState<"demo" | "real">("demo");
   const [telemetry, setTelemetry] = useState<AccountTelemetry>(EMPTY_ACCOUNT_TELEMETRY);
-  const [signals, setSignals] = useState<ClientSignal[]>(SEED_SIGNALS);
+  const [signals, setSignals] = useState<ClientSignal[]>([]);
   const [isClosingTrade, setIsClosingTrade] = useState<boolean>(false);
   const [isExecutingSignal, setIsExecutingSignal] = useState<boolean>(false);
   const [isTogglingAutoPilot, setIsTogglingAutoPilot] = useState<boolean>(false);

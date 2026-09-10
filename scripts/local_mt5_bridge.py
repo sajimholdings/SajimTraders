@@ -87,9 +87,21 @@ def execute_market_order(order: dict) -> dict:
     if not tick:
         return {"success": False, "error": f"Failed to fetch market tick for {symbol}"}
 
-    order_type = mt5.ORDER_TYPE_BUY if action == "BUY" else mt5.ORDER_TYPE_SELL
-    price = tick.ask if action == "BUY" else tick.bid
-    filling = get_filling_type(symbol)
+    # Sanitize stops against live market price to prevent 10016 (Invalid stops)
+    if action == "BUY":
+        if sl > 0 and sl >= price:
+            log(f"⚠️ Buy SL {sl} is >= market price {price}. Clearing SL for clean fill.")
+            sl = 0.0
+        if tp > 0 and tp <= price:
+            log(f"⚠️ Buy TP {tp} is <= market price {price}. Clearing TP for clean fill.")
+            tp = 0.0
+    elif action == "SELL":
+        if sl > 0 and sl <= price:
+            log(f"⚠️ Sell SL {sl} is <= market price {price}. Clearing SL for clean fill.")
+            sl = 0.0
+        if tp > 0 and tp >= price:
+            log(f"⚠️ Sell TP {tp} is >= market price {price}. Clearing TP for clean fill.")
+            tp = 0.0
 
     req = {
         "action": mt5.TRADE_ACTION_DEAL,
@@ -108,6 +120,13 @@ def execute_market_order(order: dict) -> dict:
 
     log(f"⚡ Dispatching MT5 Order: {action} {volume} {symbol} @ {price} (SL: {sl}, TP: {tp})")
     res = mt5.order_send(req)
+
+    # If broker still complains about stops, retry once with sl=0, tp=0
+    if res and res.retcode == 10016:
+        log(f"⚠️ Broker rejected with Invalid stops (code 10016). Retrying immediately with sl=0, tp=0...")
+        req["sl"] = 0.0
+        req["tp"] = 0.0
+        res = mt5.order_send(req)
 
     if res is None:
         err = mt5.last_error()
@@ -133,31 +152,39 @@ def run_bridge(args):
         log("❌ MetaTrader5 python package is not installed. Run: pip install MetaTrader5")
         sys.exit(1)
 
-    log(f"🚀 Initializing MT5 Terminal Connection...")
-    init_kwargs = {}
-    if args.login:
-        init_kwargs["login"] = int(args.login)
-    if args.password:
-        init_kwargs["password"] = args.password
-    if args.server:
-        init_kwargs["server"] = args.server
+    attached = False
+    for _ in range(3):
+        try:
+            if mt5.initialize():
+                attached = True
+                break
+        except Exception:
+            pass
+        time.sleep(0.5)
 
-    if not mt5.initialize(**init_kwargs):
-        err = mt5.last_error()
-        log(f"⚠️ Initializing with credentials returned {err}. Attempting fallback attach...")
-        if not mt5.initialize():
-            log(f"❌ Failed to attach to MT5 terminal: {mt5.last_error()}")
-            sys.exit(1)
+    if not attached:
+        init_kwargs = {}
+        if args.login:
+            init_kwargs["login"] = int(args.login)
+        if args.password:
+            init_kwargs["password"] = args.password
+        if args.server:
+            init_kwargs["server"] = args.server
+        attached = mt5.initialize(**init_kwargs)
+
+    if not attached:
+        log(f"❌ Failed to attach to MT5 terminal: {mt5.last_error()}")
+        sys.exit(1)
 
     # Verify or switch account if specified
-    if args.login and args.password and args.server:
+    acc = mt5.account_info()
+    if not acc or (args.login and str(acc.login) != str(args.login)):
+        log(f"🔄 Switching MT5 session to Account #{args.login} on {args.server}...")
+        login_res = mt5.login(login=int(args.login), password=args.password, server=args.server)
+        if not login_res:
+            log(f"❌ MT5 login failed: {mt5.last_error()}")
+            sys.exit(1)
         acc = mt5.account_info()
-        if not acc or str(acc.login) != str(args.login):
-            log(f"🔄 Switching MT5 session to Account #{args.login} on {args.server}...")
-            login_res = mt5.login(login=int(args.login), password=args.password, server=args.server)
-            if not login_res:
-                log(f"❌ MT5 login failed: {mt5.last_error()}")
-                sys.exit(1)
 
     account = mt5.account_info()
     if not account:
@@ -209,7 +236,19 @@ def run_bridge(args):
                         "comment": p.comment or ""
                     })
 
-            # 2. Build telemetry payload
+            # 2. Collect latest live market signals from BEEP engine
+            active_signals = []
+            broadcast_file = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "broadcast_active.json")
+            if os.path.exists(broadcast_file):
+                try:
+                    with open(broadcast_file, "r", encoding="utf-8") as f:
+                        raw_signals = json.load(f)
+                        if isinstance(raw_signals, list):
+                            active_signals = raw_signals[-20:]
+                except Exception:
+                    pass
+
+            # 3. Build telemetry payload
             telemetry_payload = {
                 "account_id": str(acc.login),
                 "account_name": acc.name or f"Account #{acc.login}",
@@ -221,10 +260,11 @@ def run_bridge(args):
                 "currency": acc.currency or "USD",
                 "open_positions": pos_list,
                 "floating_pnl": round(floating_pnl, 2),
+                "signals": active_signals,
                 "terminal_connected": True
             }
 
-            # 3. Push telemetry to cloud backend
+            # 4. Push telemetry & signals to cloud backend
             sync_url = f"{args.endpoint.rstrip('/')}/api/client/bridge/sync"
             res = post_json(sync_url, telemetry_payload)
             if res.get("success"):
