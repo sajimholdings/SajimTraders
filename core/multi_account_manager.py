@@ -109,11 +109,36 @@ class MultiAccountManager:
         accounts = data.setdefault("accounts", {})
         existing = accounts.get(acc_id, {})
 
+        password = account_data.get("password")
+        broker_server = account_data.get("broker_server", existing.get("broker_server", "Headway-Real"))
+        auth_verified = False
+
+        if MT5_AVAILABLE and password and password != "demo1234":
+            try:
+                if not mt5.initialize():
+                    mt5.initialize()
+                login_ok = mt5.login(login=int(acc_id), password=password, server=broker_server)
+                if login_ok:
+                    acc_info = mt5.account_info()
+                    if acc_info:
+                        auth_verified = True
+                        account_data["account_name"] = acc_info.name or f"Account #{acc_id}"
+                        logger.info(f"Verified MT5 login for {acc_id} on {broker_server}: Balance {acc_info.balance}")
+                else:
+                    err = mt5.last_error()
+                    logger.warning(f"MT5 login failed for {acc_id} on {broker_server}: {err}")
+                    return {
+                        "success": False,
+                        "error": f"Broker rejected login ({err[0]}): {err[1]}. Please verify your login number, password, and broker server name."
+                    }
+            except Exception as e:
+                logger.error(f"MT5 login exception for {acc_id}: {e}")
+
         updated = {
             "account_id": acc_id,
             "account_name": account_data.get("account_name", existing.get("account_name", f"Account #{acc_id}")),
-            "broker_server": account_data.get("broker_server", existing.get("broker_server", "Headway-Real")),
-            "broker_name": account_data.get("broker_name", existing.get("broker_name", "Headway")),
+            "broker_server": broker_server,
+            "broker_name": account_data.get("broker_name", existing.get("broker_name", broker_server.split("-")[0])),
             "autopilot_enabled": account_data.get("autopilot_enabled", existing.get("autopilot_enabled", False)),
             "risk_mode": account_data.get("risk_mode", existing.get("risk_mode", "MICRO_FIXED")),
             "max_lot": float(account_data.get("max_lot", existing.get("max_lot", 0.01))),
@@ -125,12 +150,36 @@ class MultiAccountManager:
         }
 
         accounts[acc_id] = updated
-        if not data.get("default_account_id"):
-            data["default_account_id"] = acc_id
+        data["default_account_id"] = acc_id  # Set as active account
 
         self._save_data(data)
         logger.info(f"Registered/Updated client account: {acc_id} ({updated['broker_server']})")
         return {"success": True, "account": updated}
+
+    def switch_active_account(self, account_id: str) -> Dict[str, Any]:
+        """Switches the active trading account."""
+        data = self._load_data()
+        acc_id = str(account_id).strip()
+        if acc_id not in data.get("accounts", {}):
+            return {"success": False, "error": f"Account {acc_id} not found"}
+
+        data["default_account_id"] = acc_id
+        self._save_data(data)
+        logger.info(f"Switched default active account to: {acc_id}")
+        return {"success": True, "active_account_id": acc_id}
+
+    def remove_account(self, account_id: str) -> Dict[str, Any]:
+        """Removes an account from the registry."""
+        data = self._load_data()
+        acc_id = str(account_id).strip()
+        accounts = data.get("accounts", {})
+        if acc_id in accounts:
+            del accounts[acc_id]
+            if data.get("default_account_id") == acc_id:
+                data["default_account_id"] = next(iter(accounts.keys())) if accounts else ""
+            self._save_data(data)
+            return {"success": True, "removed": acc_id}
+        return {"success": False, "error": f"Account {acc_id} not found"}
 
     def set_autopilot(self, account_id: str, enabled: bool) -> Dict[str, Any]:
         """Toggles hands-free copy trading for a specific account."""

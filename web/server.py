@@ -150,6 +150,10 @@ class SajimTradersHandler(SimpleHTTPRequestHandler):
             self.handle_client_execute(body)
         elif path == "/api/client/connect":
             self.handle_client_connect(body)
+        elif path == "/api/client/switch-account":
+            self.handle_client_switch_account(body)
+        elif path == "/api/client/delete-account":
+            self.handle_client_delete_account(body)
         elif path == "/api/client/toggle-autopilot":
             self.handle_client_toggle_autopilot(body)
         elif path == "/api/client/close-trade":
@@ -579,6 +583,26 @@ class SajimTradersHandler(SimpleHTTPRequestHandler):
             return
 
         res = account_manager.register_or_update_account(body)
+        self._send_json(res)
+
+    def handle_client_switch_account(self, body: dict):
+        """Switches the active trading account."""
+        if not account_manager:
+            self._send_json({"success": False, "error": "Account Manager unavailable"}, 500)
+            return
+
+        account_id = body.get("account_id")
+        res = account_manager.switch_active_account(account_id)
+        self._send_json(res)
+
+    def handle_client_delete_account(self, body: dict):
+        """Removes an account from the multi-account registry."""
+        if not account_manager:
+            self._send_json({"success": False, "error": "Account Manager unavailable"}, 500)
+            return
+
+        account_id = body.get("account_id")
+        res = account_manager.remove_account(account_id)
         self._send_json(res)
 
     def handle_client_toggle_autopilot(self, body: dict):

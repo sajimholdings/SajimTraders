@@ -482,11 +482,12 @@ window.switchNavTab = function(tabId) {
 };
 
 // -----------------------------------------------------------------------------
-// CONNECT MT5 MODAL
+// CONNECT MT5 MODAL & MULTI-ACCOUNT MANAGEMENT
 // -----------------------------------------------------------------------------
 window.openConnectModal = function() {
   const modal = document.getElementById("connect-modal");
   if (modal) modal.classList.add("active");
+  fetchAccountsList();
 };
 
 window.closeConnectModal = function() {
@@ -494,8 +495,108 @@ window.closeConnectModal = function() {
   if (modal) modal.classList.remove("active");
 };
 
+async function fetchAccountsList() {
+  const listContainer = document.getElementById("modal-accounts-list");
+  if (!listContainer) return;
+
+  try {
+    const res = await fetch("/api/client/accounts");
+    if (!res.ok) return;
+    const data = await res.json();
+    const accounts = data.accounts || [];
+
+    if (accounts.length === 0) {
+      listContainer.innerHTML = `<div style="font-size: 0.8rem; color: var(--text-muted);">No accounts linked yet.</div>`;
+      return;
+    }
+
+    let html = "";
+    accounts.forEach(acc => {
+      const isActive = String(acc.account_id) === String(clientAccount.account_id);
+      html += `
+        <div style="background: rgba(0,0,0,0.35); border: 1px solid ${isActive ? 'var(--cyan-accent)' : 'var(--border-subtle)'}; border-radius: 8px; padding: 0.75rem 0.9rem; display: flex; justify-content: space-between; align-items: center;">
+          <div>
+            <div style="font-weight: 700; font-size: 0.88rem; color: #fff; display: flex; align-items: center; gap: 0.45rem;">
+              <span>${acc.account_name || 'Account'} (#${acc.account_id})</span>
+              ${isActive ? '<span style="background: rgba(56, 189, 248, 0.2); color: var(--cyan-accent); font-size: 0.65rem; padding: 0.1rem 0.4rem; border-radius: 999px; font-weight: 800;">ACTIVE</span>' : ''}
+            </div>
+            <div style="font-size: 0.75rem; color: var(--text-dim); font-family: var(--font-mono); margin-top: 0.15rem;">
+              ${acc.broker_server} &bull; Risk: ${acc.risk_mode || '0.01 Lot'}
+            </div>
+          </div>
+          <div style="display: flex; gap: 0.4rem;">
+            ${!isActive ? `
+              <button style="background: rgba(56, 189, 248, 0.15); border: 1px solid var(--cyan-accent); color: var(--cyan-accent); font-size: 0.75rem; font-weight: 700; padding: 0.35rem 0.65rem; border-radius: 6px; cursor: pointer;" onclick="switchActiveAccount('${acc.account_id}')">
+                Switch
+              </button>
+            ` : ''}
+            ${accounts.length > 1 ? `
+              <button style="background: transparent; border: none; color: #fb7185; cursor: pointer; padding: 0.2rem 0.4rem; font-size: 1.1rem; line-height: 1;" onclick="removeAccount('${acc.account_id}')" title="Remove Account">
+                &times;
+              </button>
+            ` : ''}
+          </div>
+        </div>
+      `;
+    });
+
+    listContainer.innerHTML = html;
+  } catch (err) {
+    console.warn("Could not load accounts list:", err);
+  }
+}
+
+window.switchActiveAccount = async function(accountId) {
+  try {
+    const res = await fetch("/api/client/switch-account", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ account_id: accountId })
+    });
+
+    const data = await res.json();
+    if (data.success) {
+      showToast(`Switched active MT5 account to #${accountId}!`);
+      fetchAccount();
+      fetchAccountsList();
+    } else {
+      showToast("Switch failed: " + (data.error || "Unknown"));
+    }
+  } catch (err) {
+    showToast("Error switching account");
+  }
+};
+
+window.removeAccount = async function(accountId) {
+  if (!confirm(`Remove account #${accountId}?`)) return;
+  try {
+    const res = await fetch("/api/client/delete-account", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ account_id: accountId })
+    });
+
+    const data = await res.json();
+    if (data.success) {
+      showToast(`Account #${accountId} removed.`);
+      fetchAccount();
+      fetchAccountsList();
+    }
+  } catch (err) {
+    showToast("Error removing account");
+  }
+};
+
 window.handleAccountConnect = async function(e) {
   e.preventDefault();
+  const btn = document.getElementById("btn-save-account");
+  const originalText = btn ? btn.innerHTML : "";
+
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = `<div class="spinner" style="width: 18px; height: 18px; margin: 0;"></div> Authenticating with MT5...`;
+  }
+
   const broker = document.getElementById("modal-broker-server").value;
   const login = document.getElementById("modal-login").value;
   const password = document.getElementById("modal-password").value;
@@ -504,6 +605,7 @@ window.handleAccountConnect = async function(e) {
   const payload = {
     account_id: login,
     broker_server: broker,
+    password: password,
     risk_mode: riskMode,
     account_name: `Account #${login}`
   };
@@ -516,15 +618,20 @@ window.handleAccountConnect = async function(e) {
     });
 
     const data = await res.json();
-    if (data.success) {
-      showToast(`Connected successfully to MT5 #${login}!`);
+    if (res.ok && data.success) {
+      showToast(`✓ Verified & Connected MT5 #${login}!`);
       closeConnectModal();
       fetchAccount();
     } else {
-      showToast("Connect failed: " + (data.error || "Unknown"));
+      showToast(`Connection Failed: ${data.error || "Invalid credentials or server"}`);
     }
   } catch (err) {
-    showToast("Error connecting account");
+    showToast("Network error verifying MT5 connection");
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = originalText;
+    }
   }
 };
 

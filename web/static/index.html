@@ -288,50 +288,67 @@
     <div class="modal-card">
       <div class="modal-header">
         <div>
-          <h3>Connect Your MT5 Account</h3>
-          <p>Link your MetaTrader 5 account for 1-Tap execution & Auto-Pilot.</p>
+          <h3>Manage MT5 Accounts</h3>
+          <p>Switch between active accounts or link a new broker.</p>
         </div>
         <button class="modal-close" onclick="closeConnectModal()">&times;</button>
       </div>
 
-      <form id="connect-form" onsubmit="handleAccountConnect(event)">
-        <div class="form-group">
-          <label>Broker Server</label>
-          <select class="form-input" id="modal-broker-server" required>
-            <option value="Headway-Real" selected>Headway-Real (Recommended)</option>
-            <option value="Headway-Demo">Headway-Demo</option>
-            <option value="Exness-Real">Exness-Real</option>
-            <option value="JustMarkets-Live">JustMarkets-Live</option>
-            <option value="XMGlobal-Real">XMGlobal-Real</option>
-            <option value="Custom">Other / Custom Server</option>
-          </select>
+      <!-- Connected Accounts Section -->
+      <div class="connected-accounts-section" style="margin-bottom: 1.25rem;">
+        <label style="font-size: 0.75rem; font-weight: 700; color: var(--text-dim); text-transform: uppercase; display: block; margin-bottom: 0.5rem;">
+          Enrolled Accounts
+        </label>
+        <div id="modal-accounts-list" style="display: flex; flex-direction: column; gap: 0.5rem;">
+          <!-- Injected via JavaScript -->
         </div>
+      </div>
 
-        <div class="form-group">
-          <label>MT5 Login Number</label>
-          <input type="number" class="form-input" id="modal-login" placeholder="e.g. 17537803" value="17537803" required>
-        </div>
+      <div style="border-top: 1px solid var(--border-subtle); margin: 1rem 0; padding-top: 1rem;">
+        <h4 style="font-size: 0.88rem; color: #fff; margin-bottom: 0.85rem; display: flex; align-items: center; gap: 0.4rem;">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          Link Another MT5 Account
+        </h4>
 
-        <div class="form-group">
-          <label>MT5 Password</label>
-          <input type="password" class="form-input" id="modal-password" placeholder="Enter your MT5 trading password" value="demo1234">
-          <span class="form-hint">Stored securely and encrypted. You can also use investor password for read-only telemetry.</span>
-        </div>
+        <form id="connect-form" onsubmit="handleAccountConnect(event)">
+          <div class="form-group">
+            <label>Broker Server</label>
+            <select class="form-input" id="modal-broker-server" required>
+              <option value="Headway-Real" selected>Headway-Real (Recommended)</option>
+              <option value="Headway-Demo">Headway-Demo</option>
+              <option value="Exness-Real">Exness-Real</option>
+              <option value="JustMarkets-Live">JustMarkets-Live</option>
+              <option value="XMGlobal-Real">XMGlobal-Real</option>
+              <option value="Custom">Other / Custom Server</option>
+            </select>
+          </div>
 
-        <div class="form-group">
-          <label>Risk Preference</label>
-          <select class="form-input" id="modal-risk-mode">
-            <option value="MICRO_FIXED" selected>Fixed 0.01 Micro Lot (Safe for &lt;$100)</option>
-            <option value="CONSERVATIVE_1PCT">Conservative 1% Equity Risk</option>
-            <option value="BALANCED_2PCT">Balanced 2% Equity Risk</option>
-          </select>
-        </div>
+          <div class="form-group">
+            <label>MT5 Login Number</label>
+            <input type="number" class="form-input" id="modal-login" placeholder="e.g. 17537803" required>
+          </div>
 
-        <button type="submit" class="btn-primary full-width" id="btn-save-account">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
-          Save & Connect MT5
-        </button>
-      </form>
+          <div class="form-group">
+            <label>MT5 Password</label>
+            <input type="password" class="form-input" id="modal-password" placeholder="Enter your MT5 trading password">
+            <span class="form-hint">Stored securely. Broker verification confirms live connection.</span>
+          </div>
+
+          <div class="form-group">
+            <label>Risk Preference</label>
+            <select class="form-input" id="modal-risk-mode">
+              <option value="MICRO_FIXED" selected>Fixed 0.01 Micro Lot (Safe for &lt;$100)</option>
+              <option value="CONSERVATIVE_1PCT">Conservative 1% Equity Risk</option>
+              <option value="BALANCED_2PCT">Balanced 2% Equity Risk</option>
+            </select>
+          </div>
+
+          <button type="submit" class="btn-primary full-width" id="btn-save-account">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+            Connect & Authenticate MT5
+          </button>
+        </form>
+      </div>
     </div>
   </div>
 
