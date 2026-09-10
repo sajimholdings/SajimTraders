@@ -6,14 +6,19 @@ import { AccountTelemetry } from "../lib/types";
 
 interface MetricHeroCardProps {
   telemetry: AccountTelemetry;
+  onOpenConnector?: () => void;
 }
 
-export const MetricHeroCard: React.FC<MetricHeroCardProps> = ({ telemetry }) => {
+export const MetricHeroCard: React.FC<MetricHeroCardProps> = ({
+  telemetry,
+  onOpenConnector,
+}) => {
   const equity = telemetry.equity ?? 0;
   const pnl = telemetry.today_pnl ?? 0;
   const pnlPercent = telemetry.today_pnl_percent ?? 0;
   const freeMargin = telemetry.free_margin ?? 0;
   const isPositive = pnl >= 0;
+  const hasNoBroker = telemetry.broker_server === "None" || telemetry.account_id === "NEW";
 
   const formatCurrency = (value: number): string => {
     const abs = Math.abs(value);
@@ -42,25 +47,35 @@ export const MetricHeroCard: React.FC<MetricHeroCardProps> = ({ telemetry }) => 
         {formatCurrency(equity)}
       </h1>
 
-      {/* P&L pill */}
+      {/* P&L pill or Connect CTA */}
       <div className="mt-3">
-        <span
-          className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold border ${
-            isPositive
-              ? "bg-green-500/10 text-green-400 border-green-500/20"
-              : "bg-red-500/10 text-red-400 border-red-500/20"
-          }`}
-        >
-          {isPositive ? (
-            <TrendingUp className="w-3 h-3" />
-          ) : (
-            <TrendingDown className="w-3 h-3" />
-          )}
-          {isPositive ? "▲" : "▼"}{" "}
-          {isPositive ? "+" : "-"}
-          {formatCurrency(pnl)} ({isPositive ? "+" : "-"}
-          {Math.abs(pnlPercent).toFixed(1)}%)
-        </span>
+        {hasNoBroker ? (
+          <button
+            type="button"
+            onClick={onOpenConnector}
+            className="inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-bold bg-amber-500/10 text-amber-400 border border-amber-500/30 hover:bg-amber-500/20 transition-all cursor-pointer active:scale-95"
+          >
+            <span>⚡ Connect MT5 Account to Start</span>
+          </button>
+        ) : (
+          <span
+            className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold border ${
+              isPositive
+                ? "bg-green-500/10 text-green-400 border-green-500/20"
+                : "bg-red-500/10 text-red-400 border-red-500/20"
+            }`}
+          >
+            {isPositive ? (
+              <TrendingUp className="w-3 h-3" />
+            ) : (
+              <TrendingDown className="w-3 h-3" />
+            )}
+            {isPositive ? "▲" : "▼"}{" "}
+            {isPositive ? "+" : "-"}
+            {formatCurrency(pnl)} ({isPositive ? "+" : "-"}
+            {Math.abs(pnlPercent).toFixed(1)}%)
+          </span>
+        )}
       </div>
 
       {/* Bottom metrics row */}

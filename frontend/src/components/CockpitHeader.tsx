@@ -72,7 +72,11 @@ export const CockpitHeader: React.FC<CockpitHeaderProps> = ({
                 : "bg-yellow-400"
             }`}
           />
-          {brokerShort} #{telemetry.account_id}
+          {telemetry.broker_server === "None" || telemetry.account_id === "NEW" ? (
+            <span className="text-amber-400 font-sans font-semibold">⚡ Connect MT5 Broker</span>
+          ) : (
+            <>{brokerShort} #{telemetry.account_id}</>
+          )}
           <ChevronDown className="w-3 h-3 text-gray-500" />
         </button>
       </div>

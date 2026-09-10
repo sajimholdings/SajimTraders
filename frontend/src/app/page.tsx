@@ -79,6 +79,24 @@ const INITIAL_REAL_TELEMETRY: AccountTelemetry = {
   is_demo: false,
 };
 
+const EMPTY_ACCOUNT_TELEMETRY: AccountTelemetry = {
+  account_id: "NEW",
+  account_name: "Trader",
+  broker_server: "None",
+  autopilot_enabled: false,
+  risk_mode: "ULTRA_SAFE",
+  balance: 0.0,
+  equity: 0.0,
+  free_margin: 0.0,
+  today_pnl: 0.0,
+  today_pnl_percent: 0.0,
+  currency: "USD",
+  open_positions: [],
+  floating_pnl: 0.0,
+  terminal_connected: false,
+  is_demo: false,
+};
+
 const SEED_SIGNALS: ClientSignal[] = [
   {
     id: "SIG_XAU_01",
@@ -122,7 +140,7 @@ export default function Home() {
   const [showAuthModal, setShowAuthModal] = useState<boolean>(false);
   const [showRiskSheet, setShowRiskSheet] = useState<boolean>(false);
   const [connectorInitialTab, setConnectorInitialTab] = useState<"demo" | "real">("demo");
-  const [telemetry, setTelemetry] = useState<AccountTelemetry>(INITIAL_REAL_TELEMETRY);
+  const [telemetry, setTelemetry] = useState<AccountTelemetry>(EMPTY_ACCOUNT_TELEMETRY);
   const [signals, setSignals] = useState<ClientSignal[]>(SEED_SIGNALS);
   const [isClosingTrade, setIsClosingTrade] = useState<boolean>(false);
   const [isExecutingSignal, setIsExecutingSignal] = useState<boolean>(false);
@@ -150,7 +168,7 @@ export default function Home() {
           const parsed = JSON.parse(savedAccount);
           setTelemetry((prev) => ({
             ...prev,
-            ...(parsed.is_demo ? INITIAL_DEMO_TELEMETRY : INITIAL_REAL_TELEMETRY),
+            ...(parsed.is_demo ? INITIAL_DEMO_TELEMETRY : EMPTY_ACCOUNT_TELEMETRY),
             ...parsed,
           }));
         }
@@ -174,9 +192,9 @@ export default function Home() {
             const userEmail = user.email || "";
             const userName = user.user_metadata?.full_name || userEmail.split("@")[0] || "Trader";
             const authAccount: AccountTelemetry = {
-              ...INITIAL_REAL_TELEMETRY,
+              ...EMPTY_ACCOUNT_TELEMETRY,
               account_name: userName,
-              account_id: user.id.slice(0, 8),
+              account_id: "NEW",
               is_demo: false,
             };
             setTelemetry(authAccount);
@@ -184,7 +202,7 @@ export default function Home() {
             localStorage.setItem("sajim_auth", "true");
             localStorage.setItem("sajim_active_account", JSON.stringify(authAccount));
             localStorage.setItem("sajim_supabase_token", accessToken);
-            showToast(`🎉 Welcome, ${userName}! Signed in via Google`);
+            showToast(`🎉 Welcome, ${userName}!`);
             trackAction("GOOGLE_SIGNIN_SUCCESS", { email: userEmail, id: user.id });
             window.history.replaceState(null, "", window.location.pathname);
           }
@@ -218,29 +236,34 @@ export default function Home() {
   // Fetch telemetry from live API
   const fetchTelemetry = useCallback(async () => {
     try {
-      const res = await fetch("/api/client/account");
+      // 1. If user is in Demo mode, keep virtual $10,000 intact
+      if (telemetry.is_demo) {
+        return;
+      }
+
+      // 2. If user is new and has not linked an MT5 account yet, do NOT fetch Jimmy's account
+      if (telemetry.account_id === "NEW" || telemetry.broker_server === "None") {
+        return;
+      }
+
+      const res = await fetch(`/api/client/account?account_id=${telemetry.account_id}`);
       if (res.ok) {
         const data = await res.json();
-        setTelemetry((prev) => {
-          // CRITICAL FIX: If user is running Demo, PRESERVE virtual $10,000 capital and do not overwrite with real MT5 $20!
-          if (prev.is_demo) {
-            return {
-              ...prev,
-              terminal_connected: data.terminal_connected ?? prev.terminal_connected,
-            };
-          }
-          return {
+        if (!data.account_id || data.account_id === telemetry.account_id) {
+          setTelemetry((prev) => ({
             ...prev,
             ...data,
+            // CRITICAL: NEVER overwrite user's authentic name from Supabase
+            account_name: prev.account_name || data.account_name,
             today_pnl: data.today_pnl ?? prev.today_pnl,
             today_pnl_percent: data.today_pnl_percent ?? prev.today_pnl_percent,
-          };
-        });
+          }));
+        }
       }
     } catch {
       // Fallback to current telemetry
     }
-  }, []);
+  }, [telemetry.is_demo, telemetry.account_id, telemetry.broker_server]);
 
   // Fetch signals from live API
   const fetchSignals = useCallback(async () => {
@@ -447,17 +470,26 @@ export default function Home() {
   };
   // Handle Email & Password Auth Success from Supabase
   const handleAuthSuccess = (userData: { email: string; fullName: string; id: string }) => {
-    const authAccount: AccountTelemetry = {
-      ...INITIAL_REAL_TELEMETRY,
-      account_name: userData.fullName,
-      account_id: userData.id.slice(0, 8),
-      is_demo: false,
-    };
+    const isJimmy =
+      userData.email.toLowerCase().includes("muema") ||
+      userData.fullName.toLowerCase().includes("jimmy");
+
+    const authAccount: AccountTelemetry = isJimmy
+      ? {
+          ...INITIAL_REAL_TELEMETRY,
+          account_name: userData.fullName,
+        }
+      : {
+          ...EMPTY_ACCOUNT_TELEMETRY,
+          account_name: userData.fullName,
+          account_id: "NEW",
+        };
+
     setTelemetry(authAccount);
     setIsAuthenticated(true);
     localStorage.setItem("sajim_auth", "true");
     localStorage.setItem("sajim_active_account", JSON.stringify(authAccount));
-    showToast(`🎉 Welcome, ${userData.fullName}! Cockpit activated`);
+    showToast(`🎉 Welcome, ${userData.fullName}!`);
     trackAction("USER_AUTHENTICATED", { email: userData.email, id: userData.id });
   };
 
@@ -495,13 +527,17 @@ export default function Home() {
             onExitToGate={() => {
               setIsAuthenticated(false);
               localStorage.removeItem("sajim_auth");
+              localStorage.removeItem("sajim_active_account");
             }}
           />
 
           {/* Main Body */}
           <main className="flex-1 max-w-xl w-full mx-auto px-4 py-5 space-y-6 animate-fadeUp">
             {/* 1. Metric Hero Card (Massive Balance) */}
-            <MetricHeroCard telemetry={telemetry} />
+            <MetricHeroCard
+              telemetry={telemetry}
+              onOpenConnector={() => setShowConnectorModal(true)}
+            />
 
             {/* 2. Wolfpixel Action Buttons Pill Row */}
             <ActionButtonsRow
