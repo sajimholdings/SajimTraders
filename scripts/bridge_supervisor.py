@@ -39,6 +39,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [SUPERVISOR] %(messa
 log = logging.getLogger("BridgeSupervisor")
 
 BRIDGE_SCRIPT = os.path.join(ROOT_DIR, "scripts", "local_mt5_bridge.py")
+SIGNAL_SCRIPT = os.path.join(ROOT_DIR, "scripts", "signal_generator.py")
 MIN_RESTART_SECONDS = 30.0
 
 
@@ -51,11 +52,22 @@ def main():
 
     workers = {}          # account_id -> subprocess.Popen
     last_start = {}       # account_id -> epoch time of last launch
+    signal_proc = None    # signal generator subprocess
+    signal_last_start = 0.0
 
     log("Bridge supervisor started. Watching trading_accounts...")
     while True:
         try:
             accounts = bridge.list_trading_accounts()
+
+            # Keep the V2 signal generator running (opt-out via SIGNAL_GENERATOR=0)
+            if os.environ.get("SIGNAL_GENERATOR", "1") != "0":
+                if (signal_proc is None or signal_proc.poll() is not None) and \
+                        (time.time() - signal_last_start) >= MIN_RESTART_SECONDS:
+                    signal_proc = subprocess.Popen([sys.executable, SIGNAL_SCRIPT], env=os.environ.copy())
+                    signal_last_start = time.time()
+                    log.info("Started V2 signal generator")
+
             for acc in accounts:
                 acc_id = str(acc.get("account_id", "")).strip()
                 if not acc_id:
@@ -101,6 +113,8 @@ def main():
     for acc_id, proc in workers.items():
         if proc.poll() is None:
             proc.terminate()
+    if signal_proc is not None and signal_proc.poll() is None:
+        signal_proc.terminate()
     return 0
 
 
