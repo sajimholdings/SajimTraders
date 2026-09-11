@@ -28,6 +28,7 @@ if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
 
 from core.supabase_bridge import SupabaseBridge
+from core.credential_vault import encrypt_password
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("SajimFastAPI")
@@ -150,6 +151,9 @@ def connect(body: dict, user: dict = Depends(get_current_user)):
         "is_demo": "demo" in str(broker_server).lower(),
         "terminal_connected": False,
     }
+    password = body.get("password")
+    if password:
+        payload["encrypted_password"] = encrypt_password(str(password))
     res = bridge.upsert_trading_account(payload)
     if not res.get("success"):
         raise HTTPException(status_code=400, detail=res.get("error", "connect failed"))

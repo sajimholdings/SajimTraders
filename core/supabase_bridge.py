@@ -137,6 +137,11 @@ class SupabaseBridge:
         res = self._request("trading_accounts?autopilot_enabled=eq.true&select=*", method="GET")
         return res if isinstance(res, list) else []
 
+    def list_trading_accounts(self) -> List[Dict[str, Any]]:
+        """Fetch all registered trading accounts (service role)."""
+        res = self._request("trading_accounts?select=*&order=created_at.asc", method="GET")
+        return res if isinstance(res, list) else []
+
     def sync_account_telemetry(
         self,
         account_id: str,
