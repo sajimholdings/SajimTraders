@@ -100,13 +100,14 @@ CREATE TABLE IF NOT EXISTS public.orders_queue (
     trading_account_id UUID REFERENCES public.trading_accounts(id) ON DELETE CASCADE,
     account_id TEXT NOT NULL,
     symbol TEXT NOT NULL,
-    action TEXT NOT NULL CHECK (action IN ('BUY', 'SELL')),
+    action TEXT NOT NULL CHECK (action IN ('BUY', 'SELL', 'CLOSE')),
     volume NUMERIC(6, 2) DEFAULT 0.01,
     sl NUMERIC(12, 5),
     tp NUMERIC(12, 5),
     comment TEXT DEFAULT 'Sajim_1Tap',
     status TEXT DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'PROCESSING', 'FILLED', 'REJECTED', 'CLOSED')),
     mt5_ticket BIGINT,
+    close_ticket BIGINT,
     open_price NUMERIC(12, 5),
     current_price NUMERIC(12, 5),
     floating_pnl NUMERIC(10, 2) DEFAULT 0.00,
@@ -258,3 +259,13 @@ INSERT INTO public.signals (
     'Early trend surge detected on dynamic baseline. Enters at low maturity with +0.35R Breakeven Shield protection.',
     TRUE
 ) ON CONFLICT (id) DO UPDATE SET is_active = TRUE;
+
+-- ========================================================================================
+-- MIGRATION NOTES (only if schema.sql was applied BEFORE the CLOSE-order support was added)
+-- ========================================================================================
+-- ALTER TABLE public.orders_queue ADD COLUMN IF NOT EXISTS close_ticket BIGINT;
+-- To widen the action CHECK on an existing table:
+--   ALTER TABLE public.orders_queue DROP CONSTRAINT IF EXISTS orders_queue_action_check;
+--   ALTER TABLE public.orders_queue ADD CONSTRAINT orders_queue_action_check
+--       CHECK (action IN ('BUY', 'SELL', 'CLOSE'));
+-- ========================================================================================

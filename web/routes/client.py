@@ -13,6 +13,7 @@ Handles:
 import os
 import json
 import sys
+import time
 import logging
 from datetime import datetime
 from web.routes.base import (
@@ -79,7 +80,7 @@ def get_account_manager():
                 "broker_server": body.get("broker_server", "Headway-Real"),
                 "broker_name": str(body.get("broker_server", "Headway")).split("-")[0],
                 "autopilot_enabled": bool(body.get("autopilot_enabled", True)),
-                "risk_mode": body.get("risk_mode", "MICRO_FIXED"),
+                "risk_mode": body.get("risk_mode", "ULTRA_SAFE"),
                 "balance": float(body.get("balance", 0.0)),
                 "equity": float(body.get("equity", 0.0)),
                 "free_margin": float(body.get("free_margin", 0.0)),

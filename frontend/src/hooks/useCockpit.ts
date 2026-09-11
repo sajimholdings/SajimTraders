@@ -97,6 +97,8 @@ export function useCockpit() {
     const accessToken = params.get("access_token");
     if (!accessToken) return;
 
+    storage.setToken(accessToken);
+
     supabaseAuth.getUser(accessToken).then((user) => {
       if (!user) return;
       const email = user.email || "";
@@ -256,7 +258,8 @@ export function useCockpit() {
         return;
       }
 
-      const res = await api.closeTrade(ticket);
+      const position = telemetry.open_positions.find((p) => p.ticket === ticket);
+      const res = await api.closeTrade(ticket, telemetry.account_id, position?.symbol);
       setIsClosingTrade(false);
 
       if (res.ok && res.data.success) {

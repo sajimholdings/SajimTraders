@@ -1,0 +1,4 @@
+# Sajim Traders — Windows-only bridge host dependencies.
+# Install on the machine running MetaTrader 5 (NOT on Render/Linux):
+#   pip install -r requirements.txt -r requirements-windows.txt
+MetaTrader5>=5.0.45

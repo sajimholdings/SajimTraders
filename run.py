@@ -239,9 +239,10 @@ def cmd_digest(args):
 
 
 def cmd_web(args):
-    print(f"[*] Launching Sajim Traders Institutional Web App on http://localhost:{args.port}...")
-    from web.server import run_web_server
-    run_web_server(port=args.port)
+    print(f"[*] Launching Sajim Traders FastAPI Gateway on http://localhost:{args.port}...")
+    import uvicorn
+    from web.app import app
+    uvicorn.run(app, host="0.0.0.0", port=args.port)
 
 
 def main():

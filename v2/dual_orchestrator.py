@@ -19,6 +19,7 @@ Execution Logic:
 import os
 import sys
 import time
+import json
 import logging
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
@@ -119,18 +120,24 @@ class SajimDualOrchestrator:
                 pass
 
         target_acc = self.target_account or broker_cfg.get("active_account")
-        pwd = broker_cfg.get("password")
-        srv = broker_cfg.get("server")
+        accounts_map = broker_cfg.get("accounts", {})
+        target_str = str(target_acc) if target_acc else ""
+        if target_str in accounts_map:
+            pwd = accounts_map[target_str].get("password", broker_cfg.get("password"))
+            srv = accounts_map[target_str].get("server", broker_cfg.get("server"))
+        else:
+            pwd = broker_cfg.get("password")
+            srv = broker_cfg.get("server")
 
         acc = mt5.account_info()
         if target_acc and (acc is None or acc.login != target_acc):
             logger.info(f"Switching active account to {target_acc} on server '{srv}'...")
             if pwd and srv:
-                mt5.login(login=target_acc, password=pwd, server=srv)
+                mt5.login(login=int(target_acc), password=pwd, server=srv)
             elif srv:
-                mt5.login(login=target_acc, server=srv)
+                mt5.login(login=int(target_acc), server=srv)
             else:
-                mt5.login(login=target_acc)
+                mt5.login(login=int(target_acc))
             acc = mt5.account_info()
 
         if not acc:
@@ -234,18 +241,24 @@ class SajimDualOrchestrator:
         )
 
     def run_continuous(self) -> None:
-        """Runs the continuous multi-bot execution loop."""
+        """Runs the continuous multi-bot execution loop with auto-recovery."""
         logger.info(f"[+] Launching Dual Continuous Loop (Scan Interval: {self.scan_interval}s)...")
         try:
             while True:
-                now = time.time()
-                if now - self.last_scan_time >= self.scan_interval:
-                    self.last_scan_time = now
-                    self.execute_dual_pass()
-                else:
-                    # High-frequency sub-second management tick between scans
-                    self.v1_server.manage_stream_tick()
-                    self.v2_bot.manage_open_positions()
-                    time.sleep(1.0)
+                try:
+                    now = time.time()
+                    if now - self.last_scan_time >= self.scan_interval:
+                        self.last_scan_time = now
+                        self.execute_dual_pass()
+                    else:
+                        # High-frequency sub-second management tick between scans
+                        self.v1_server.manage_stream_tick()
+                        self.v2_bot.manage_open_positions()
+                        time.sleep(1.0)
+                except KeyboardInterrupt:
+                    raise
+                except Exception as loop_err:
+                    logger.error(f"[!] Cycle Exception in Dual Orchestrator: {loop_err}")
+                    time.sleep(2.0)
         except KeyboardInterrupt:
             logger.info("\n[!] Dual Orchestrator paused by operator. Standing down.")

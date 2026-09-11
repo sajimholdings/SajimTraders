@@ -1,6 +1,15 @@
 import type { BackendAccount, ClientSignal } from "./types";
+import { storage } from "./storage";
 
 export type ApiResult<T> = { ok: true; data: T } | { ok: false; error: string };
+
+function authHeaders(extra?: HeadersInit): HeadersInit {
+  const token = storage.getToken();
+  return {
+    ...(extra || {}),
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
+}
 
 export interface StatusResponse {
   system_online?: boolean;
@@ -45,7 +54,7 @@ export interface CloseTradeResponse {
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<ApiResult<T>> {
   try {
-    const res = await fetch(path, init);
+    const res = await fetch(path, { ...init, headers: authHeaders(init?.headers) });
     const data = (await res.json().catch(() => null)) as
       | (T & { error?: string; message?: string })
       | null;
@@ -89,6 +98,10 @@ export const api = {
   execute: (body: Record<string, unknown>) =>
     post<ExecuteResponse>("/api/client/execute", body),
 
-  closeTrade: (ticket: number) =>
-    post<CloseTradeResponse>("/api/client/close-trade", { ticket }),
+  closeTrade: (ticket: number, accountId?: string, symbol?: string) =>
+    post<CloseTradeResponse>("/api/client/close-trade", {
+      ticket,
+      account_id: accountId,
+      symbol,
+    }),
 };

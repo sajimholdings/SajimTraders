@@ -13,8 +13,12 @@ Exposes:
 import json
 import os
 import sys
+import logging
+from datetime import datetime
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from typing import Dict, Any, List
+
+logger = logging.getLogger("BeepApi")
 
 # Add paths
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -37,14 +41,18 @@ except ImportError:
     from beep_signal_engine import BeepSignalEngine, get_market_session
 from vault_original_beep.raw_beep_equations import OriginalRawBeep
 
-# Configuration & Security Keys
+# Configuration & Security Keys (loaded from environment only — no hardcoded secrets)
 API_PORT = int(os.environ.get("BEEP_API_PORT", 8080))
-VALID_API_KEYS = {
-    os.environ.get("BEEP_CLIENT_KEY", "sajim-tete-live-key-9921"): "Tete_CTO_Client",
-    os.environ.get("BEEP_SAMMY_KEY", "sajim-sammy-risk-key-4412"): "Sammy_Risk_Client",
-    os.environ.get("BEEP_MASTER_KEY", "jimmy-founder-master-secret-7700"): "Jimmy_CEO_Master",
-}
-MASTER_OVERRIDE_KEY = os.environ.get("BEEP_MASTER_KEY", "jimmy-founder-master-secret-7700")
+VALID_API_KEYS = {}
+for _env, _role in (
+    ("BEEP_CLIENT_KEY", "Tete_CTO_Client"),
+    ("BEEP_SAMMY_KEY", "Sammy_Risk_Client"),
+    ("BEEP_MASTER_KEY", "Jimmy_CEO_Master"),
+):
+    _key = os.environ.get(_env)
+    if _key:
+        VALID_API_KEYS[_key] = _role
+MASTER_OVERRIDE_KEY = os.environ.get("BEEP_MASTER_KEY", "")
 
 # In-memory broadcast queue for Tete's communication API
 DISPATCHED_ALERTS: List[Dict[str, Any]] = []

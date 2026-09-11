@@ -55,7 +55,7 @@ class MultiAccountManager:
                         "broker_server": "Headway-Real",
                         "broker_name": "Headway",
                         "autopilot_enabled": False,
-                        "risk_mode": "MICRO_FIXED",
+                        "risk_mode": "ULTRA_SAFE",
                         "max_lot": 0.01,
                         "fixed_lot": 0.01,
                         "max_open_trades": 3,
@@ -149,7 +149,7 @@ class MultiAccountManager:
             "broker_server": broker_server,
             "broker_name": account_data.get("broker_name", existing.get("broker_name", broker_server.split("-")[0])),
             "autopilot_enabled": account_data.get("autopilot_enabled", existing.get("autopilot_enabled", False)),
-            "risk_mode": account_data.get("risk_mode", existing.get("risk_mode", "MICRO_FIXED")),
+            "risk_mode": account_data.get("risk_mode", existing.get("risk_mode", "ULTRA_SAFE")),
             "balance": balance,
             "equity": equity,
             "free_margin": free_margin,
@@ -310,10 +310,10 @@ class MultiAccountManager:
         - Large accounts ($500+): calculated proportional to 1-2% risk distance
         """
         account = self.get_account(account_id) or {}
-        risk_mode = account.get("risk_mode", "MICRO_FIXED")
+        risk_mode = account.get("risk_mode", "ULTRA_SAFE")
         fixed_lot = float(account.get("fixed_lot", 0.01))
 
-        if risk_mode == "MICRO_FIXED":
+        if risk_mode in ("MICRO_FIXED", "ULTRA_SAFE"):
             return max(0.01, min(fixed_lot, 0.02))
 
         balance = 20.0
@@ -503,7 +503,7 @@ class MultiAccountManager:
             "account_name": account.get("account_name", "Jimmy Muema" if is_jimmy else f"Account #{acc_id}"),
             "broker_server": account.get("broker_server", "Headway-Real" if is_jimmy else "Headway-Demo"),
             "autopilot_enabled": account.get("autopilot_enabled", False),
-            "risk_mode": account.get("risk_mode", "MICRO_FIXED"),
+            "risk_mode": account.get("risk_mode", "ULTRA_SAFE"),
             "balance": round(stored_bal, 2),
             "equity": round(stored_equity, 2),
             "free_margin": round(stored_margin, 2),

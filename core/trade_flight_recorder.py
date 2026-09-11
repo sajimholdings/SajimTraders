@@ -187,7 +187,7 @@ class TradeFlightRecorder:
         final_r = round(final_dist / init_risk, 3)
 
         flight["status"] = "CLOSED"
-        flight["closed_at"] = datetime.now().isoformat(),
+        flight["closed_at"] = datetime.now().isoformat()
         flight["closed_timestamp"] = now_ts
         flight["duration_seconds"] = elapsed_sec
         flight["exit_price"] = exit_price

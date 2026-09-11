@@ -1,10 +1,11 @@
+import os
 import MetaTrader5 as mt5
 import sys
 
-HEADWAY_PATH = r"C:\Program Files\MetaTrader 5\terminal64.exe"
-LOGIN = 17537803
-PASSWORD = "Jimmy123!"
-SERVER = "Headway-Real"
+HEADWAY_PATH = os.environ.get("MT5_TERMINAL_PATH", r"C:\Program Files\MetaTrader 5\terminal64.exe")
+LOGIN = os.environ.get("MT5_LOGIN", "")
+PASSWORD = os.environ.get("MT5_PASSWORD", "")
+SERVER = os.environ.get("MT5_SERVER", "Headway-Real")
 
 print("--- INITIALIZING MT5 TERMINAL ---", flush=True)
 print(f"Terminal Path: {HEADWAY_PATH}", flush=True)
@@ -15,17 +16,20 @@ if not mt5.initialize(path=HEADWAY_PATH):
 
 print("mt5.initialize SUCCESSFUL!", flush=True)
 
-# Attempt login
-print(f"Logging in to {LOGIN} on server {SERVER}...")
-authorized = mt5.login(login=LOGIN, password=PASSWORD, server=SERVER)
+# Attempt login (only if credentials were supplied via environment)
+if LOGIN and PASSWORD:
+    print(f"Logging in to {LOGIN} on server {SERVER}...")
+    authorized = mt5.login(login=int(LOGIN), password=PASSWORD, server=SERVER)
 
-if not authorized:
-    print(f"Login failed! Error: {mt5.last_error()}")
-    acc = mt5.account_info()
-    if acc:
-        print(f"Current Account: {acc.login}, Server: {acc.server}")
+    if not authorized:
+        print(f"Login failed! Error: {mt5.last_error()}")
+        acc = mt5.account_info()
+        if acc:
+            print(f"Current Account: {acc.login}, Server: {acc.server}")
+    else:
+        print("mt5.login SUCCESSFUL!")
 else:
-    print("mt5.login SUCCESSFUL!")
+    print("No MT5_LOGIN/MT5_PASSWORD set — attaching to whatever account the terminal is already logged into.")
 
 acc = mt5.account_info()
 if acc is not None:

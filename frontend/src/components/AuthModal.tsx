@@ -4,6 +4,7 @@ import React, { useState } from "react";
 import { X, Lock, Mail, User, ArrowRight, ShieldCheck } from "lucide-react";
 import { supabaseAuth } from "../lib/supabase";
 import { trackAction } from "../lib/logger";
+import { storage } from "../lib/storage";
 import type { AuthMode, AuthUser } from "../lib/types";
 
 interface AuthModalProps {
@@ -50,6 +51,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       }
       // Immediately sign in to confirm the new account.
       const login = await supabaseAuth.signInWithPassword(email, password);
+      const token = (login.session as { access_token?: string } | null)?.access_token;
+      if (token) storage.setToken(token);
       setLoading(false);
 
       const resolvedName = fullName.trim() || email.split("@")[0];
@@ -70,6 +73,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       }
 
       const user = login.user;
+      const token = (login.session as { access_token?: string } | null)?.access_token;
+      if (token) storage.setToken(token);
       const resolvedName = user?.user_metadata?.full_name || email.split("@")[0] || "Trader";
       const userId = user?.id || `USER-${Math.floor(Math.random() * 10000)}`;
       trackAction("AUTH_SIGNIN_SUCCESS", { email, id: userId });
