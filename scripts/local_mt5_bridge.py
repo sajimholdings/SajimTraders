@@ -44,6 +44,7 @@ except ImportError:
     MT5_INSTALLED = False
 
 from core.supabase_bridge import SupabaseBridge
+from core.mt5_login import get_login_kwargs
 
 MAGIC_V2 = 888222
 
@@ -267,7 +268,8 @@ def run_bridge(args):
 
     # --- Connect to MT5 terminal ---
     attached = False
-    init_kwargs = {}
+    init_kwargs = get_login_kwargs()
+    # CLI/env overrides take precedence over broker_config.json
     if args.terminal_path:
         init_kwargs["path"] = args.terminal_path
     if args.login:

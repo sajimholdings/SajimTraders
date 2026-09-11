@@ -25,13 +25,20 @@ for p in (ROOT_DIR, os.path.join(ROOT_DIR, "core"), os.path.join(ROOT_DIR, "v2")
 
 import MetaTrader5 as mt5
 from v2.sajim_v2_dual_bot import SajimV2DualBot
+from core.mt5_login import get_login_kwargs
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [SIGNAL] %(message)s")
 log = logging.getLogger("SignalGenerator")
 
 
 def main():
-    if not mt5.initialize():
+    os.environ["MUTE_TELEGRAM"] = "1"  # signal generator publishes to Supabase, not Telegram
+    kwargs = get_login_kwargs()
+    ok = mt5.initialize(**kwargs) if kwargs else mt5.initialize()
+    if not ok:
+        time.sleep(2)
+        ok = mt5.initialize(**kwargs) if kwargs else mt5.initialize()
+    if not ok:
         log.error(f"MT5 init failed: {mt5.last_error()}")
         return 1
 
