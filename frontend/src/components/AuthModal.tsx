@@ -2,14 +2,15 @@
 
 import React, { useState } from "react";
 import { X, Lock, Mail, User, ArrowRight, ShieldCheck } from "lucide-react";
-import { supabase } from "../lib/supabase";
+import { supabaseAuth } from "../lib/supabase";
 import { trackAction } from "../lib/logger";
+import type { AuthMode, AuthUser } from "../lib/types";
 
 interface AuthModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSuccess: (userData: { email: string; fullName: string; id: string }) => void;
-  initialMode?: "signup" | "signin";
+  onSuccess: (user: AuthUser) => void;
+  initialMode?: AuthMode;
 }
 
 export const AuthModal: React.FC<AuthModalProps> = ({
@@ -18,7 +19,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   onSuccess,
   initialMode = "signup",
 }) => {
-  const [mode, setMode] = useState<"signup" | "signin">(initialMode);
+  const [mode, setMode] = useState<AuthMode>(initialMode);
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -30,51 +31,47 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
-    setLoading(true);
 
     if (password.length < 6) {
       setErrorMsg("Password must be at least 6 characters long.");
-      setLoading(false);
       return;
     }
 
+    setLoading(true);
+
     if (mode === "signup") {
       trackAction("AUTH_SIGNUP_ATTEMPT", { email });
-      const res = await supabase.signUp(email, password, fullName);
-
-      if (res.error) {
-        setErrorMsg(res.error);
+      const signup = await supabaseAuth.signUp(email, password, fullName);
+      if (signup.error) {
+        setErrorMsg(signup.error);
         setLoading(false);
-        trackAction("AUTH_SIGNUP_ERROR", { error: res.error });
+        trackAction("AUTH_SIGNUP_ERROR", { error: signup.error });
         return;
       }
-
-      // Automatically sign in to obtain access token
-      const loginRes = await supabase.signInWithPassword(email, password);
+      // Immediately sign in to confirm the new account.
+      const login = await supabaseAuth.signInWithPassword(email, password);
       setLoading(false);
 
       const resolvedName = fullName.trim() || email.split("@")[0];
-      const userId = res.user?.id || loginRes.user?.id || "USER-" + Math.floor(Math.random() * 10000);
-
+      const userId =
+        signup.user?.id || login.user?.id || `USER-${Math.floor(Math.random() * 10000)}`;
       trackAction("AUTH_SIGNUP_SUCCESS", { email, id: userId });
       onSuccess({ email, fullName: resolvedName, id: userId });
       onClose();
     } else {
-      // Sign In mode
       trackAction("AUTH_SIGNIN_ATTEMPT", { email });
-      const res = await supabase.signInWithPassword(email, password);
+      const login = await supabaseAuth.signInWithPassword(email, password);
       setLoading(false);
 
-      if (res.error) {
-        setErrorMsg(res.error);
-        trackAction("AUTH_SIGNIN_ERROR", { error: res.error });
+      if (login.error) {
+        setErrorMsg(login.error);
+        trackAction("AUTH_SIGNIN_ERROR", { error: login.error });
         return;
       }
 
-      const user = res.user;
+      const user = login.user;
       const resolvedName = user?.user_metadata?.full_name || email.split("@")[0] || "Trader";
-      const userId = user?.id || "USER-" + Math.floor(Math.random() * 10000);
-
+      const userId = user?.id || `USER-${Math.floor(Math.random() * 10000)}`;
       trackAction("AUTH_SIGNIN_SUCCESS", { email, id: userId });
       onSuccess({ email, fullName: resolvedName, id: userId });
       onClose();
@@ -89,7 +86,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       }}
     >
       <div className="w-full max-w-sm bg-[#111111] border border-white/[0.08] rounded-3xl p-6 shadow-2xl relative text-white">
-        {/* Header */}
         <div className="flex items-center justify-between mb-5">
           <div className="flex items-center gap-2.5">
             <div className="w-9 h-9 rounded-xl bg-green-500/10 border border-green-500/20 flex items-center justify-center text-green-400">
@@ -111,7 +107,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           </button>
         </div>
 
-        {/* Mode Switcher Tabs */}
         <div className="grid grid-cols-2 gap-1.5 bg-black/50 p-1 rounded-2xl border border-white/[0.06] mb-4">
           <button
             type="button"
@@ -143,14 +138,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           </button>
         </div>
 
-        {/* Error Notification */}
         {errorMsg && (
           <div className="mb-4 p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 text-xs font-medium">
             {errorMsg}
           </div>
         )}
 
-        {/* Form */}
         <form onSubmit={handleSubmit} className="space-y-3.5 text-left">
           {mode === "signup" && (
             <div>
@@ -212,7 +205,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               <div className="w-4 h-4 border-2 border-black border-t-transparent rounded-full animate-spin" />
             ) : (
               <>
-                <span>{mode === "signup" ? "⚡ CREATE ACCOUNT & LAUNCH" : "🔓 SIGN IN TO COCKPIT"}</span>
+                <span>
+                  {mode === "signup" ? "⚡ CREATE ACCOUNT & LAUNCH" : "🔓 SIGN IN TO COCKPIT"}
+                </span>
                 <ArrowRight className="w-4 h-4" />
               </>
             )}

@@ -1,8 +1,6 @@
-"use client";
-
 import React from "react";
 import { LogOut, ChevronDown } from "lucide-react";
-import { AccountTelemetry } from "../lib/types";
+import type { AccountTelemetry } from "../lib/types";
 
 interface CockpitHeaderProps {
   telemetry: AccountTelemetry;
@@ -22,17 +20,13 @@ export const CockpitHeader: React.FC<CockpitHeaderProps> = ({
 
   return (
     <header className="sticky top-0 z-40 bg-black/90 backdrop-blur-md border-b border-white/[0.06] px-4 py-3">
-      {/* Top row */}
       <div className="flex items-center justify-between">
-        {/* Left — greeting */}
         <div className="flex flex-col">
           <span className="text-xs text-gray-500">Welcome back,</span>
           <span className="text-sm font-bold text-white">{name}</span>
         </div>
 
-        {/* Right — avatar + exit */}
         <div className="flex items-center gap-3">
-          {/* Avatar */}
           <div className="relative">
             <div
               className={`w-9 h-9 rounded-full bg-[#111111] flex items-center justify-center border-2 ${
@@ -46,7 +40,6 @@ export const CockpitHeader: React.FC<CockpitHeaderProps> = ({
             )}
           </div>
 
-          {/* Exit button */}
           <button
             type="button"
             onClick={onExitToGate}
@@ -58,7 +51,6 @@ export const CockpitHeader: React.FC<CockpitHeaderProps> = ({
         </div>
       </div>
 
-      {/* Account pill */}
       <div className="mt-2">
         <button
           type="button"
@@ -67,9 +59,7 @@ export const CockpitHeader: React.FC<CockpitHeaderProps> = ({
         >
           <span
             className={`w-1.5 h-1.5 rounded-full ${
-              connected
-                ? "bg-green-400 shadow-[0_0_6px_rgba(34,197,94,0.5)]"
-                : "bg-yellow-400"
+              connected ? "bg-green-400 shadow-[0_0_6px_rgba(34,197,94,0.5)]" : "bg-yellow-400"
             }`}
           />
           {telemetry.broker_server === "None" || telemetry.account_id === "NEW" ? (

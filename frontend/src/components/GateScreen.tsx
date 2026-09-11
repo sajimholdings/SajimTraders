@@ -1,39 +1,24 @@
-"use client";
-
 import React from "react";
 import { Rocket, Zap, ShieldCheck, Lock, CheckCircle2, ArrowRight } from "lucide-react";
+import type { GateStats } from "../lib/types";
+import { AFFILIATE_URL } from "../lib/constants";
+import { formatSignedCurrency } from "../lib/format";
 
 interface GateScreenProps {
-  onLaunchDemo?: () => void;
-  onStartDemo?: () => void;
-  onConnectReal?: () => void;
-  onOpenConnectModal?: () => void;
-  onOpenAuthModal?: () => void;
+  onLaunchDemo: () => void;
+  onConnectReal: () => void;
+  onOpenAuth: () => void;
+  liveStats: GateStats | null;
   affiliateLink?: string;
-  liveStats?: { total_pnl: number; total_trades: number; win_rate: number } | null;
 }
 
 export const GateScreen: React.FC<GateScreenProps> = ({
   onLaunchDemo,
-  onStartDemo,
   onConnectReal,
-  onOpenConnectModal,
-  onOpenAuthModal,
-  affiliateLink = "https://headway.partners/user/signup?hwp=b158cc",
+  onOpenAuth,
   liveStats,
+  affiliateLink = AFFILIATE_URL,
 }) => {
-  const handleDemo = () => {
-    (onLaunchDemo || onStartDemo)?.();
-  };
-
-  const handleReal = () => {
-    (onConnectReal || onOpenConnectModal)?.();
-  };
-
-  const handleAuth = () => {
-    onOpenAuthModal?.();
-  };
-
   return (
     <div className="min-h-screen bg-black text-white flex flex-col justify-between px-4 py-8 sm:py-12 max-w-md mx-auto animate-fadeUp">
       {/* Top Section: Logo & Badge */}
@@ -54,7 +39,6 @@ export const GateScreen: React.FC<GateScreenProps> = ({
           Autonomous Quant Engine
         </span>
 
-        {/* Hero Headline */}
         <h1 className="text-3xl sm:text-4xl font-extrabold text-white tracking-tight leading-tight mb-2">
           Your Money.{" "}
           <span className="text-green-400 drop-shadow-[0_0_20px_rgba(34,197,94,0.3)]">
@@ -65,25 +49,29 @@ export const GateScreen: React.FC<GateScreenProps> = ({
           Connect your MT5 account in 30 seconds. Zero code. 100% hands-free execution.
         </p>
 
-        {/* Live Aggregated Telemetry Strip (if available) */}
+        {/* Live Aggregated Telemetry Strip */}
         {liveStats && (
           <div className="grid grid-cols-3 gap-2 w-full mt-6 bg-[#111111] border border-white/[0.06] rounded-2xl p-3 text-center">
             <div>
               <span className="block text-[10px] text-gray-500 uppercase">Today P&L</span>
               <strong className="text-xs font-mono text-green-400 font-bold">
-                {liveStats.total_pnl >= 0 ? "+" : ""}${liveStats.total_pnl.toFixed(2)}
+                {liveStats.today_pnl === null ? "—" : formatSignedCurrency(liveStats.today_pnl)}
               </strong>
             </div>
             <div>
               <span className="block text-[10px] text-gray-500 uppercase">Active Trades</span>
               <strong className="text-xs font-mono text-white font-bold">
-                {liveStats.total_trades}
+                {liveStats.active_trades ?? "—"}
               </strong>
             </div>
             <div>
-              <span className="block text-[10px] text-gray-500 uppercase">Win Edge</span>
-              <strong className="text-xs font-mono text-green-400 font-bold">
-                {liveStats.win_rate.toFixed(1)}%
+              <span className="block text-[10px] text-gray-500 uppercase">Engine</span>
+              <strong
+                className={`text-xs font-mono font-bold ${
+                  liveStats.system_online ? "text-green-400" : "text-gray-500"
+                }`}
+              >
+                {liveStats.system_online ? "LIVE" : "OFFLINE"}
               </strong>
             </div>
           </div>
@@ -92,10 +80,9 @@ export const GateScreen: React.FC<GateScreenProps> = ({
 
       {/* Middle Section: Zero Friction Actions */}
       <div className="my-8 space-y-3">
-        {/* Primary Demo Button */}
         <button
           type="button"
-          onClick={handleDemo}
+          onClick={onLaunchDemo}
           className="w-full py-4 px-5 rounded-2xl bg-gradient-to-r from-green-500 to-green-600 hover:from-green-400 hover:to-green-500 text-black font-extrabold text-sm shadow-[0_4px_25px_rgba(34,197,94,0.3)] transition-all flex items-center justify-between group active:scale-[0.98] cursor-pointer"
         >
           <div className="flex items-center gap-3">
@@ -112,10 +99,9 @@ export const GateScreen: React.FC<GateScreenProps> = ({
           <ArrowRight className="w-4 h-4 text-black group-hover:translate-x-1 transition-transform" />
         </button>
 
-        {/* Email & Password Supabase Account Button */}
         <button
           type="button"
-          onClick={handleAuth}
+          onClick={onOpenAuth}
           className="w-full py-3.5 px-5 rounded-2xl bg-[#111111] hover:bg-[#161616] border border-white/[0.08] hover:border-white/20 text-white font-bold text-sm transition-all flex items-center justify-between group active:scale-[0.98] cursor-pointer"
         >
           <div className="flex items-center gap-3">
@@ -132,10 +118,9 @@ export const GateScreen: React.FC<GateScreenProps> = ({
           <ArrowRight className="w-4 h-4 text-gray-500 group-hover:translate-x-1 transition-transform" />
         </button>
 
-        {/* Secondary Real Account Button */}
         <button
           type="button"
-          onClick={handleReal}
+          onClick={onConnectReal}
           className="w-full py-3.5 px-5 rounded-2xl bg-[#111111] hover:bg-[#161616] border border-white/[0.08] hover:border-white/20 text-white font-bold text-sm transition-all flex items-center justify-between group active:scale-[0.98] cursor-pointer"
         >
           <div className="flex items-center gap-3">
@@ -155,7 +140,6 @@ export const GateScreen: React.FC<GateScreenProps> = ({
 
       {/* Bottom Section: Headway Partner & Trust Strip */}
       <div className="space-y-4">
-        {/* Partner Card */}
         <div className="bg-[#111111] border border-white/[0.06] rounded-2xl p-4 text-left">
           <div className="flex items-center justify-between mb-1">
             <span className="text-[10px] font-extrabold text-green-400 tracking-wider uppercase">
@@ -177,7 +161,6 @@ export const GateScreen: React.FC<GateScreenProps> = ({
           </a>
         </div>
 
-        {/* Trust Badges */}
         <div className="flex items-center justify-center gap-3 text-[11px] text-gray-600 font-medium py-1">
           <span className="inline-flex items-center gap-1">
             <Lock className="w-3 h-3 text-green-400" /> 0.01 Micro Risk
@@ -188,7 +171,7 @@ export const GateScreen: React.FC<GateScreenProps> = ({
           </span>
           <span>•</span>
           <span className="inline-flex items-center gap-1">
-            <CheckCircle2 className="w-3 h-3 text-green-400" /> 92.6% Win Edge
+            <CheckCircle2 className="w-3 h-3 text-green-400" /> 24/7 Hands-Free
           </span>
         </div>
       </div>

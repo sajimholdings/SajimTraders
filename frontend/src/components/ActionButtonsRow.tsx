@@ -1,5 +1,3 @@
-"use client";
-
 import React from "react";
 import { Zap, Target, Shield, RotateCw } from "lucide-react";
 
@@ -22,7 +20,6 @@ export const ActionButtonsRow: React.FC<ActionButtonsRowProps> = ({
 }) => {
   return (
     <div className="grid grid-cols-4 gap-2.5">
-      {/* 1. Auto-Pilot Toggle */}
       <button
         type="button"
         onClick={onToggleAutoPilot}
@@ -44,7 +41,6 @@ export const ActionButtonsRow: React.FC<ActionButtonsRowProps> = ({
         </span>
       </button>
 
-      {/* 2. Signals Quick Jump */}
       <button
         type="button"
         onClick={onScrollToSignals}
@@ -55,7 +51,6 @@ export const ActionButtonsRow: React.FC<ActionButtonsRowProps> = ({
         <span className="text-[9px] text-gray-500 font-mono mt-0.5">1-Tap</span>
       </button>
 
-      {/* 3. Risk Mode Sheet */}
       <button
         type="button"
         onClick={onOpenRiskSheet}
@@ -66,7 +61,6 @@ export const ActionButtonsRow: React.FC<ActionButtonsRowProps> = ({
         <span className="text-[9px] text-gray-500 font-mono mt-0.5">+0.35R</span>
       </button>
 
-      {/* 4. Manual Refresh */}
       <button
         type="button"
         onClick={onRefresh}

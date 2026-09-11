@@ -1,13 +1,25 @@
-"use client";
-
 import React from "react";
 import { X, Shield, Gauge, Flame, Check } from "lucide-react";
+import type { RiskMode } from "../lib/types";
+import { RISK_MODES } from "../lib/constants";
+
+const MODE_ICONS = {
+  ULTRA_SAFE: Shield,
+  PRO_SCALP: Gauge,
+  MAX_YIELD: Flame,
+} as const;
+
+const MODE_PALETTE = {
+  ULTRA_SAFE: { color: "text-green-400", bg: "bg-green-500/10 border-green-500/30" },
+  PRO_SCALP: { color: "text-sky-400", bg: "bg-sky-500/10 border-sky-500/30" },
+  MAX_YIELD: { color: "text-amber-400", bg: "bg-amber-500/10 border-amber-500/30" },
+} as const;
 
 interface RiskModeSheetProps {
   isOpen: boolean;
   onClose: () => void;
   currentMode: string;
-  onSelectMode: (mode: string) => void;
+  onSelectMode: (mode: RiskMode) => void;
 }
 
 export const RiskModeSheet: React.FC<RiskModeSheetProps> = ({
@@ -17,33 +29,6 @@ export const RiskModeSheet: React.FC<RiskModeSheetProps> = ({
   onSelectMode,
 }) => {
   if (!isOpen) return null;
-
-  const MODES = [
-    {
-      id: "ULTRA_SAFE",
-      title: "Ultra Safe",
-      subtitle: "0.01 Micro lot fixed • 1% maximum portfolio risk",
-      icon: Shield,
-      color: "text-green-400",
-      bg: "bg-green-500/10 border-green-500/30",
-    },
-    {
-      id: "PRO_SCALP",
-      title: "Pro Scalp",
-      subtitle: "Dynamic 0.02 - 0.05 lot • 2% target compound risk",
-      icon: Gauge,
-      color: "text-sky-400",
-      bg: "bg-sky-500/10 border-sky-500/30",
-    },
-    {
-      id: "MAX_YIELD",
-      title: "Max Yield",
-      subtitle: "High-velocity momentum scaling • 5% max risk",
-      icon: Flame,
-      color: "text-amber-400",
-      bg: "bg-amber-500/10 border-amber-500/30",
-    },
-  ];
 
   return (
     <div
@@ -68,13 +53,15 @@ export const RiskModeSheet: React.FC<RiskModeSheetProps> = ({
         </div>
 
         <p className="text-xs text-gray-400 mb-4 leading-relaxed">
-          All profiles are protected by the proprietary <strong className="text-green-400">+0.35R Breakeven Shield</strong>.
-          Stop Loss moves to entry + lock fee automatically.
+          All profiles are protected by the proprietary{" "}
+          <strong className="text-green-400">+0.35R Breakeven Shield</strong>. Stop Loss moves to
+          entry + lock fee automatically.
         </p>
 
         <div className="space-y-2.5">
-          {MODES.map((m) => {
-            const Icon = m.icon;
+          {RISK_MODES.map((m) => {
+            const Icon = MODE_ICONS[m.id];
+            const palette = MODE_PALETTE[m.id];
             const isSelected = currentMode === m.id;
             return (
               <button
@@ -91,8 +78,8 @@ export const RiskModeSheet: React.FC<RiskModeSheetProps> = ({
                 }`}
               >
                 <div className="flex items-center gap-3">
-                  <div className={`w-9 h-9 rounded-xl border flex items-center justify-center ${m.bg}`}>
-                    <Icon className={`w-4 h-4 ${m.color}`} />
+                  <div className={`w-9 h-9 rounded-xl border flex items-center justify-center ${palette.bg}`}>
+                    <Icon className={`w-4 h-4 ${palette.color}`} />
                   </div>
                   <div>
                     <strong className="block text-xs font-bold text-white">{m.title}</strong>

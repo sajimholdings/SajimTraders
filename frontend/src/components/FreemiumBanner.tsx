@@ -1,7 +1,6 @@
-"use client";
-
 import React from "react";
 import { Sparkles, ArrowRight, ExternalLink, ShieldCheck } from "lucide-react";
+import { AFFILIATE_URL } from "../lib/constants";
 
 interface FreemiumBannerProps {
   onSwitchToRealModal?: () => void;
@@ -10,7 +9,7 @@ interface FreemiumBannerProps {
 
 export const FreemiumBanner: React.FC<FreemiumBannerProps> = ({
   onSwitchToRealModal,
-  affiliateLink = "https://headway.partners/user/signup?hwp=b158cc",
+  affiliateLink = AFFILIATE_URL,
 }) => {
   return (
     <div className="bg-[#111111] border border-green-500/20 rounded-2xl p-5 shadow-[0_0_20px_rgba(34,197,94,0.1)] relative overflow-hidden">
@@ -21,7 +20,8 @@ export const FreemiumBanner: React.FC<FreemiumBannerProps> = ({
             <span>Keep 100% of Your Profits in Real USD</span>
           </div>
           <p className="text-xs text-gray-400 leading-relaxed">
-            You are running on <strong className="text-white">Free Demo Mode</strong>. Switch to a verified real account with official partner broker Headway to withdraw live daily gains.
+            You are running on <strong className="text-white">Free Demo Mode</strong>. Switch to a
+            verified real account with official partner broker Headway to withdraw live daily gains.
           </p>
           <div className="flex items-center gap-3 pt-1 text-[11px] text-gray-500">
             <span className="flex items-center gap-1 text-green-400 font-medium">

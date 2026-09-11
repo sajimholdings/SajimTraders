@@ -10,6 +10,13 @@ interface SignalsQuickGridProps {
   isExecuting: boolean;
 }
 
+function healthBadgeClass(status?: string): string {
+  const s = (status || "").toUpperCase();
+  if (s.includes("PRIME")) return "bg-green-500/15 text-green-400 border-green-500/30";
+  if (s.includes("HEALTHY")) return "bg-sky-500/15 text-sky-400 border-sky-500/30";
+  return "bg-amber-500/15 text-amber-400 border-amber-500/30";
+}
+
 export const SignalsQuickGrid: React.FC<SignalsQuickGridProps> = ({
   signals,
   onExecute,
@@ -36,34 +43,26 @@ export const SignalsQuickGrid: React.FC<SignalsQuickGridProps> = ({
 
   return (
     <section className="space-y-4">
-      {/* Section Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2.5">
           <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
-          <h2 className="text-white text-lg font-bold tracking-tight">
-            Live Signals
-          </h2>
+          <h2 className="text-white text-lg font-bold tracking-tight">Live Signals</h2>
         </div>
         <span className="text-[11px] font-semibold text-green-400 bg-green-500/10 border border-green-500/20 px-2.5 py-1 rounded-full">
           {signals.length} Ready
         </span>
       </div>
 
-      {/* Empty State */}
       {signals.length === 0 && (
         <div className="bg-[#111111] border border-white/[0.06] rounded-2xl p-6 text-center">
           <Zap className="w-8 h-8 text-green-400 mx-auto mb-3 animate-pulse" />
-          <p className="text-white font-semibold text-sm mb-1">
-            Scanning Active Markets
-          </p>
+          <p className="text-white font-semibold text-sm mb-1">Scanning Active Markets</p>
           <p className="text-gray-500 text-xs">
-            Analyzing XAUUSD, EURUSD, GBPJPY and more for high-probability
-            setups…
+            Analyzing XAUUSD, EURUSD, GBPJPY and more for high-probability setups…
           </p>
         </div>
       )}
 
-      {/* Signal Cards Grid */}
       {signals.length > 0 && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           {signals.map((signal) => {
@@ -77,54 +76,37 @@ export const SignalsQuickGrid: React.FC<SignalsQuickGridProps> = ({
                 key={signal.id}
                 className="relative bg-[#111111] border border-white/[0.06] rounded-2xl p-4 overflow-hidden hover:border-white/10 transition-colors"
               >
-                {/* Top accent line */}
                 <div
                   className={`absolute top-0 left-0 right-0 h-[2px] ${
                     isBuy ? "bg-green-400" : "bg-red-400"
                   }`}
                 />
 
-                {/* Header Row */}
                 <div className="flex items-start justify-between mb-3">
                   <div className="flex items-center gap-2">
-                    <span className="text-base font-bold text-white">
-                      {signal.symbol}
-                    </span>
+                    <span className="text-base font-bold text-white">{signal.symbol}</span>
                     <span
                       className={`text-[10px] font-bold px-2 py-0.5 rounded ${
-                        isBuy
-                          ? "bg-green-500/15 text-green-400"
-                          : "bg-red-500/15 text-red-400"
+                        isBuy ? "bg-green-500/15 text-green-400" : "bg-red-500/15 text-red-400"
                       }`}
                     >
                       {signal.action}
                     </span>
-                    <span className="text-gray-500 text-[11px]">
-                      {signal.timeframe}
-                    </span>
+                    <span className="text-gray-500 text-[11px]">{signal.timeframe}</span>
                   </div>
                   <div className="text-right">
-                    <p className="text-green-400 text-xs font-bold">
-                      {signal.win_probability}
-                    </p>
-                    <p className="text-gray-500 text-[10px]">
-                      {signal.strategy}
-                    </p>
+                    <p className="text-green-400 text-xs font-bold">{signal.win_probability}</p>
+                    <p className="text-gray-500 text-[10px]">{signal.strategy}</p>
                   </div>
                 </div>
 
-                {/* Price Grid */}
                 <div className="bg-black/50 rounded-xl p-2.5 grid grid-cols-3 gap-2 text-center mb-3">
                   <div>
                     <p className="text-gray-500 text-[10px] mb-0.5">Entry</p>
-                    <p className="text-white text-xs font-mono font-semibold">
-                      {signal.entry}
-                    </p>
+                    <p className="text-white text-xs font-mono font-semibold">{signal.entry}</p>
                   </div>
                   <div>
-                    <p className="text-green-400 text-[10px] mb-0.5">
-                      TP ({signal.rr})
-                    </p>
+                    <p className="text-green-400 text-[10px] mb-0.5">TP ({signal.rr})</p>
                     <p className="text-green-400 text-xs font-mono font-semibold">
                       {signal.gain_estimate_usd}
                     </p>
@@ -137,7 +119,31 @@ export const SignalsQuickGrid: React.FC<SignalsQuickGridProps> = ({
                   </div>
                 </div>
 
-                {/* Execute Button */}
+                {(signal.expected_duration || signal.trade_health_status) && (
+                  <div className="flex items-center justify-between text-[10px] text-gray-500 mb-2.5">
+                    {signal.expected_duration ? (
+                      <span>⏱ {signal.expected_duration}</span>
+                    ) : (
+                      <span />
+                    )}
+                    {signal.trade_health_status && (
+                      <span
+                        className={`px-1.5 py-0.5 rounded border font-bold ${healthBadgeClass(
+                          signal.trade_health_status
+                        )}`}
+                      >
+                        {signal.trade_health_status}
+                      </span>
+                    )}
+                  </div>
+                )}
+
+                {signal.trade_explainer && (
+                  <p className="text-[11px] text-gray-500 leading-snug mb-3 line-clamp-2">
+                    {signal.trade_explainer}
+                  </p>
+                )}
+
                 <button
                   disabled={disabled}
                   onClick={() => handleTap(signal)}
@@ -175,5 +181,3 @@ export const SignalsQuickGrid: React.FC<SignalsQuickGridProps> = ({
     </section>
   );
 };
-
-export default SignalsQuickGrid;

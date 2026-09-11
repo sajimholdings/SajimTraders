@@ -1,14 +1,17 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { X, ArrowRight, Zap, Shield } from "lucide-react";
-import { supabase } from "../lib/supabase";
+import { X, ArrowRight, Zap } from "lucide-react";
+import { api } from "../lib/api";
+import { trackAction } from "../lib/logger";
+import { AFFILIATE_URL, DEMO_ACCOUNT_ID, DEMO_PASSWORD } from "../lib/constants";
+import type { AccountTelemetry, ConnectorTab } from "../lib/types";
 
 interface AccountConnectorModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onConnectSuccess: (accountData: any) => void;
-  initialTab?: "DEMO" | "REAL" | "demo" | "real";
+  onConnectSuccess: (account: Partial<AccountTelemetry>) => void;
+  initialTab?: ConnectorTab;
   currentAccountId?: string;
   currentServer?: string;
   affiliateLink?: string;
@@ -18,128 +21,78 @@ export const AccountConnectorModal: React.FC<AccountConnectorModalProps> = ({
   isOpen,
   onClose,
   onConnectSuccess,
-  initialTab = "DEMO",
+  initialTab = "demo",
   currentAccountId,
   currentServer,
-  affiliateLink = "https://headway.partners/user/signup?hwp=b158cc",
+  affiliateLink = AFFILIATE_URL,
 }) => {
-  const normalizedInitial = initialTab.toUpperCase() as "DEMO" | "REAL";
-  const [activeTab, setActiveTab] = useState<"DEMO" | "REAL">(normalizedInitial);
-  const [server, setServer] = useState(
-    currentServer || (normalizedInitial === "DEMO" ? "Headway-Demo" : "Headway-Real")
-  );
-  const [login, setLogin] = useState(
-    currentAccountId && currentAccountId !== "NEW"
-      ? currentAccountId
-      : normalizedInitial === "DEMO"
-      ? "1200442972"
-      : ""
-  );
-  const [password, setPassword] = useState(normalizedInitial === "DEMO" ? "demo1234" : "");
+  const [tab, setTab] = useState<ConnectorTab>(initialTab);
+  const [server, setServer] = useState("Headway-Demo");
+  const [login, setLogin] = useState("");
+  const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
 
-  // Synchronize state when modal opens or initialTab / currentAccount changes
-  useEffect(() => {
-    if (isOpen) {
-      const tab = initialTab.toUpperCase() as "DEMO" | "REAL";
-      setActiveTab(tab);
-      setErrorMsg("");
-      if (tab === "DEMO") {
-        setServer("Headway-Demo");
-        setLogin(currentAccountId && currentAccountId.startsWith("DEMO-") ? currentAccountId : "1200442972");
-        setPassword("demo1234");
-      } else {
-        setServer(currentServer && currentServer !== "None" ? currentServer : "Headway-Real");
-        setLogin(currentAccountId && currentAccountId !== "NEW" && !currentAccountId.startsWith("DEMO-") ? currentAccountId : "");
-        setPassword("");
-      }
-    }
-  }, [isOpen, initialTab, currentAccountId, currentServer]);
-
-  if (!isOpen) return null;
-
-  const handleTabSwitch = (tab: "DEMO" | "REAL") => {
-    setActiveTab(tab);
+  const applyTabDefaults = (next: ConnectorTab) => {
+    setTab(next);
     setErrorMsg("");
-    if (tab === "DEMO") {
+    if (next === "demo") {
       setServer("Headway-Demo");
-      setLogin("1200442972");
-      setPassword("demo1234");
+      setLogin(DEMO_ACCOUNT_ID);
+      setPassword(DEMO_PASSWORD);
     } else {
       setServer(currentServer && currentServer !== "None" ? currentServer : "Headway-Real");
-      setLogin(currentAccountId && currentAccountId !== "NEW" && !currentAccountId.startsWith("DEMO-") ? currentAccountId : "");
+      setLogin(
+        currentAccountId && currentAccountId !== "NEW" && !currentAccountId.startsWith("DEMO-")
+          ? currentAccountId
+          : ""
+      );
       setPassword("");
     }
   };
 
+  // Re-sync form fields whenever the modal opens with a new tab.
+  useEffect(() => {
+    if (isOpen) applyTabDefaults(initialTab);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, initialTab, currentAccountId, currentServer]);
+
+  if (!isOpen) return null;
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setLoading(true);
     setErrorMsg("");
 
-    if (activeTab === "DEMO") {
-      setTimeout(() => {
+    if (tab === "demo") {
+      setLoading(true);
+      window.setTimeout(() => {
         setLoading(false);
-        onConnectSuccess({
-          account_id: login || "1200442972",
-          account_name: "Free Demo Trader",
-          broker_server: server,
-          autopilot_enabled: true,
-          balance: 10000.0,
-          equity: 10084.35,
-          free_margin: 9950.0,
-          today_pnl: 84.35,
-          today_pnl_percent: 0.84,
-          currency: "USD",
-          terminal_connected: true,
-          is_demo: true,
-          open_positions: [],
-        });
+        onConnectSuccess({ is_demo: true, account_name: "Free Demo Trader" });
         onClose();
       }, 400);
       return;
     }
 
-    try {
-      const res = await fetch("/api/client/connect", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          account_id: login,
-          broker_server: server,
-          password: password,
-          autopilot_enabled: true,
-          risk_mode: "ULTRA_SAFE",
-        }),
-      });
+    setLoading(true);
+    const res = await api.connect({
+      account_id: login,
+      broker_server: server,
+      password,
+      autopilot_enabled: true,
+      risk_mode: "ULTRA_SAFE",
+    });
+    setLoading(false);
 
-      const data = await res.json();
-      if (data.success) {
-        try {
-          const storedUser = localStorage.getItem("sajim_user");
-          if (storedUser) {
-            const parsedUser = JSON.parse(storedUser);
-            if (parsedUser.id) {
-              supabase.connectTradingAccount(parsedUser.id, {
-                account_id: login,
-                broker_server: server,
-                is_demo: false,
-                risk_mode: "ULTRA_SAFE",
-              }).catch(() => {});
-            }
-          }
-        } catch {}
-
-        onConnectSuccess(data.account || { account_id: login, broker_server: server, is_demo: false });
-        onClose();
-      } else {
-        setErrorMsg(data.error || "Failed to verify broker login. Check MT5 credentials.");
-      }
-    } catch (err: any) {
-      setErrorMsg("Connection error reaching broker gateway: " + err.message);
-    } finally {
-      setLoading(false);
+    if (res.ok && res.data.success) {
+      trackAction("MT5_ACCOUNT_CONNECTED", { broker: server, id: login });
+      onConnectSuccess(
+        res.data.account
+          ? { ...res.data.account, is_demo: false }
+          : { account_id: login, broker_server: server, is_demo: false }
+      );
+      onClose();
+    } else {
+      setErrorMsg(res.ok ? res.data.error || "Failed to verify broker login." : res.error);
     }
   };
 
@@ -151,7 +104,6 @@ export const AccountConnectorModal: React.FC<AccountConnectorModalProps> = ({
       }}
     >
       <div className="w-full max-w-sm bg-[#111111] border border-white/[0.08] rounded-3xl p-6 shadow-2xl relative text-white">
-        {/* Header */}
         <div className="flex items-center justify-between mb-5">
           <div className="flex items-center gap-2.5">
             <div className="w-8 h-8 rounded-xl bg-green-500/10 border border-green-500/20 flex items-center justify-center text-green-400">
@@ -171,32 +123,35 @@ export const AccountConnectorModal: React.FC<AccountConnectorModalProps> = ({
           </button>
         </div>
 
-        {/* 2 Options Tabs */}
         <div className="grid grid-cols-2 gap-2 mb-4">
           <button
             type="button"
-            onClick={() => handleTabSwitch("DEMO")}
+            onClick={() => applyTabDefaults("demo")}
             className={`p-2.5 rounded-2xl border text-center transition-all cursor-pointer ${
-              activeTab === "DEMO"
+              tab === "demo"
                 ? "bg-green-500/15 border-green-500/50 text-white shadow-[0_0_15px_rgba(34,197,94,0.15)]"
                 : "bg-black/40 border-white/[0.06] text-gray-500 hover:text-gray-300"
             }`}
           >
-            <span className="block text-[9px] font-extrabold text-green-400 uppercase tracking-wider">★ Free</span>
+            <span className="block text-[9px] font-extrabold text-green-400 uppercase tracking-wider">
+              ★ Free
+            </span>
             <strong className="block text-xs font-bold mt-0.5">Option 1: Demo</strong>
             <small className="block text-[10px] text-gray-500">Zero capital risk</small>
           </button>
 
           <button
             type="button"
-            onClick={() => handleTabSwitch("REAL")}
+            onClick={() => applyTabDefaults("real")}
             className={`p-2.5 rounded-2xl border text-center transition-all cursor-pointer ${
-              activeTab === "REAL"
+              tab === "real"
                 ? "bg-sky-500/15 border-sky-500/50 text-white shadow-[0_0_15px_rgba(56,189,248,0.15)]"
                 : "bg-black/40 border-white/[0.06] text-gray-500 hover:text-gray-300"
             }`}
           >
-            <span className="block text-[9px] font-extrabold text-sky-400 uppercase tracking-wider">Real Capital</span>
+            <span className="block text-[9px] font-extrabold text-sky-400 uppercase tracking-wider">
+              Real Capital
+            </span>
             <strong className="block text-xs font-bold mt-0.5">Option 2: Real MT5</strong>
             <small className="block text-[10px] text-gray-500">Trade live profits</small>
           </button>
@@ -208,7 +163,6 @@ export const AccountConnectorModal: React.FC<AccountConnectorModalProps> = ({
           </div>
         )}
 
-        {/* Form */}
         <form onSubmit={handleSubmit} className="space-y-3.5 text-left">
           <div>
             <label className="block text-xs font-semibold text-gray-400 mb-1">Broker Server</label>
@@ -249,7 +203,6 @@ export const AccountConnectorModal: React.FC<AccountConnectorModalProps> = ({
             />
           </div>
 
-          {/* Headway Quick Referral */}
           <div className="bg-black/30 border border-white/[0.06] rounded-2xl p-3 text-center">
             <span className="block text-[10px] font-bold text-green-400 uppercase tracking-wider">
               Need a new MT5 account?

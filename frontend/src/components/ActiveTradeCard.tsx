@@ -1,47 +1,32 @@
-"use client";
-
 import React from "react";
 import { X, ShieldCheck, Radio, ArrowUpRight, ArrowDownRight } from "lucide-react";
-import { ClientTrade } from "../lib/types";
+import type { ClientTrade } from "../lib/types";
 import { SymbolIcon } from "./SymbolIcon";
+import { formatSignedCurrency } from "../lib/format";
 
 interface ActiveTradeCardProps {
   trades?: ClientTrade[];
-  trade?: ClientTrade | null;
   onClosePosition?: (ticket: number) => void;
-  onCloseTrade?: (ticket: number) => void;
   isClosing?: boolean;
 }
 
 export const ActiveTradeCard: React.FC<ActiveTradeCardProps> = ({
-  trades,
-  trade,
+  trades = [],
   onClosePosition,
-  onCloseTrade,
   isClosing = false,
 }) => {
-  const handleClose = onClosePosition || onCloseTrade || (() => {});
-
-  let activeList: ClientTrade[] = [];
-  if (trades && trades.length > 0) {
-    activeList = trades;
-  } else if (trade) {
-    activeList = [trade];
-  }
+  const handleClose = onClosePosition ?? (() => {});
 
   return (
     <section className="space-y-3">
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <h2 className="text-white text-lg font-bold tracking-tight">Positions</h2>
-        </div>
+        <h2 className="text-white text-lg font-bold tracking-tight">Positions</h2>
         <span className="text-[11px] font-semibold text-gray-400 bg-white/5 border border-white/[0.06] px-2.5 py-1 rounded-full font-mono">
-          {activeList.length} Active
+          {trades.length} Active
         </span>
       </div>
 
-      {activeList.length === 0 ? (
-        /* Radar Scanner State */
+      {trades.length === 0 ? (
         <div className="bg-[#111111] border border-white/[0.06] rounded-2xl p-6 relative overflow-hidden">
           <div className="flex items-center gap-4">
             <div className="relative w-12 h-12 flex items-center justify-center shrink-0">
@@ -68,19 +53,19 @@ export const ActiveTradeCard: React.FC<ActiveTradeCardProps> = ({
           </div>
         </div>
       ) : (
-        /* Token-Style Position Cards (Matching Wolfpixel Bitcoin/Toncoin rows) */
         <div className="space-y-2.5">
-          {activeList.map((t) => {
+          {trades.map((t) => {
             const isProfit = (t.pnl || 0) >= 0;
             const isBuy = t.type === "BUY";
-            const hasShield = (t.comment || "").toUpperCase().includes("BE_SHIELD") || (t.comment || "").toUpperCase().includes("LOCKED");
+            const hasShield =
+              (t.comment || "").toUpperCase().includes("BE_SHIELD") ||
+              (t.comment || "").toUpperCase().includes("LOCKED");
 
             return (
               <div
                 key={t.ticket}
                 className="bg-[#111111] hover:bg-[#151515] border border-white/[0.06] hover:border-white/10 transition-all rounded-2xl p-4 flex items-center justify-between relative group"
               >
-                {/* Left: Token Icon + Symbol Details */}
                 <div className="flex items-center gap-3">
                   <SymbolIcon symbol={t.symbol} className="w-11 h-11" />
                   <div>
@@ -97,7 +82,9 @@ export const ActiveTradeCard: React.FC<ActiveTradeCardProps> = ({
                     </div>
 
                     <div className="flex items-center gap-2 mt-0.5 text-xs text-gray-500 font-mono">
-                      <span>Entry: {typeof t.open_price === "number" ? t.open_price.toFixed(2) : t.open_price}</span>
+                      <span>
+                        Entry: {typeof t.open_price === "number" ? t.open_price.toFixed(2) : t.open_price}
+                      </span>
                       {hasShield && (
                         <span className="inline-flex items-center gap-1 text-[10px] text-green-400 font-bold bg-green-500/10 px-1.5 py-0.2 rounded border border-green-500/20">
                           <ShieldCheck className="w-3 h-3" /> +0.35R
@@ -107,7 +94,6 @@ export const ActiveTradeCard: React.FC<ActiveTradeCardProps> = ({
                   </div>
                 </div>
 
-                {/* Right: Floating Gain + Close Button */}
                 <div className="flex items-center gap-3">
                   <div className="text-right">
                     <strong
@@ -115,7 +101,7 @@ export const ActiveTradeCard: React.FC<ActiveTradeCardProps> = ({
                         isProfit ? "text-green-400" : "text-red-400"
                       }`}
                     >
-                      {isProfit ? "+" : ""}${typeof t.pnl === "number" ? t.pnl.toFixed(2) : t.pnl}
+                      {formatSignedCurrency(typeof t.pnl === "number" ? t.pnl : 0)}
                     </strong>
                     <span className="block text-[10px] text-gray-500 font-mono">
                       Now: {typeof t.current_price === "number" ? t.current_price.toFixed(2) : t.current_price}

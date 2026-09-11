@@ -1,8 +1,7 @@
-"use client";
-
 import React from "react";
 import { TrendingUp, TrendingDown } from "lucide-react";
-import { AccountTelemetry } from "../lib/types";
+import type { AccountTelemetry } from "../lib/types";
+import { formatCurrency, formatSignedCurrency, formatPercent } from "../lib/format";
 
 interface MetricHeroCardProps {
   telemetry: AccountTelemetry;
@@ -20,34 +19,23 @@ export const MetricHeroCard: React.FC<MetricHeroCardProps> = ({
   const isPositive = pnl >= 0;
   const hasNoBroker = telemetry.broker_server === "None" || telemetry.account_id === "NEW";
 
-  const formatCurrency = (value: number): string => {
-    const abs = Math.abs(value);
-    if (abs >= 1_000_000) return `$${(abs / 1_000_000).toFixed(2)}M`;
-    if (abs >= 10_000) return `$${abs.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-    return `$${abs.toFixed(2)}`;
-  };
-
   return (
     <section className="pt-2 pb-1">
-      {/* Demo badge */}
       {telemetry.is_demo && (
         <span className="inline-block mb-3 bg-amber-500/10 text-amber-400 border border-amber-500/20 rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider">
           Demo Mode
         </span>
       )}
 
-      {/* Label */}
       <p className="text-xs text-gray-500 font-medium uppercase tracking-wider mb-1.5">
         Portfolio value
       </p>
 
-      {/* Main balance */}
       <h1 className="text-[42px] sm:text-5xl font-bold text-white tracking-tight font-mono leading-none">
-        {pnl < 0 && equity < 0 ? "-" : ""}
+        {equity < 0 ? "-" : ""}
         {formatCurrency(equity)}
       </h1>
 
-      {/* P&L pill or Connect CTA */}
       <div className="mt-3">
         {hasNoBroker ? (
           <button
@@ -65,32 +53,20 @@ export const MetricHeroCard: React.FC<MetricHeroCardProps> = ({
                 : "bg-red-500/10 text-red-400 border-red-500/20"
             }`}
           >
-            {isPositive ? (
-              <TrendingUp className="w-3 h-3" />
-            ) : (
-              <TrendingDown className="w-3 h-3" />
-            )}
-            {isPositive ? "▲" : "▼"}{" "}
-            {isPositive ? "+" : "-"}
-            {formatCurrency(pnl)} ({isPositive ? "+" : "-"}
-            {Math.abs(pnlPercent).toFixed(1)}%)
+            {isPositive ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
+            {formatSignedCurrency(pnl)} ({formatPercent(pnlPercent)})
           </span>
         )}
       </div>
 
-      {/* Bottom metrics row */}
       <div className="flex gap-6 mt-5 text-xs">
         <div>
           <span className="block text-gray-500 mb-0.5">Equity</span>
-          <span className="text-white font-mono font-medium">
-            ${equity.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-          </span>
+          <span className="text-white font-mono font-medium">{formatCurrency(equity)}</span>
         </div>
         <div>
           <span className="block text-gray-500 mb-0.5">Free Margin</span>
-          <span className="text-white font-mono font-medium">
-            ${freeMargin.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-          </span>
+          <span className="text-white font-mono font-medium">{formatCurrency(freeMargin)}</span>
         </div>
         <div>
           <span className="block text-gray-500 mb-0.5">BE Shield</span>
