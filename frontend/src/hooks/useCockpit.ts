@@ -68,6 +68,36 @@ export function useCockpit() {
     toastTimerRef.current = setTimeout(() => setToast(null), TOAST_DURATION_MS);
   }, []);
 
+  // After auth, auto-load the user's first registered MT5 account (if any) so the
+  // live balance/equity shows without requiring a manual "Connect" step.
+  const loadUserAccounts = useCallback(async () => {
+    const listRes = await api.getAccounts();
+    if (!listRes.ok) return;
+    const accounts = Array.isArray(listRes.data.accounts) ? listRes.data.accounts : [];
+    if (accounts.length === 0) return;
+    const first = accounts[0];
+    const accountId = String(first.account_id ?? "");
+    if (!accountId) return;
+
+    const accRes = await api.getAccount(accountId);
+    if (!accRes.ok) return;
+    const d = accRes.data as AccountTelemetry;
+    const updated: AccountTelemetry = {
+      ...EMPTY_TELEMETRY,
+      ...d,
+      account_id: String(d.account_id ?? accountId),
+      account_name: d.account_name || first.account_name || "Trader",
+      broker_server: d.broker_server || first.broker_server || "None",
+      is_demo: false,
+      terminal_connected: Boolean(d.terminal_connected),
+      today_pnl: Number(d.today_pnl ?? 0),
+      today_pnl_percent: Number(d.today_pnl_percent ?? 0),
+      open_positions: Array.isArray(d.open_positions) ? d.open_positions : [],
+    };
+    setTelemetry(updated);
+    storage.setAccount(updated);
+  }, []);
+
   // Restore a persisted session on first client mount.
   useEffect(() => {
     if (storage.isAuthenticated()) {
@@ -108,11 +138,12 @@ export function useCockpit() {
       setIsAuthenticated(true);
       storage.setAuthenticated(true);
       storage.setAccount(account);
+      void loadUserAccounts();
       showToast(`🎉 Welcome, ${fullName}!`);
       trackAction("GOOGLE_SIGNIN_SUCCESS", { email, id: user.id });
       window.history.replaceState(null, "", window.location.pathname);
     });
-  }, [showToast]);
+  }, [showToast, loadUserAccounts]);
 
   // Load aggregated portfolio stats once on mount.
   useEffect(() => {
@@ -379,10 +410,11 @@ export function useCockpit() {
       setIsAuthenticated(true);
       storage.setAuthenticated(true);
       storage.setAccount(account);
+      void loadUserAccounts();
       showToast(`🎉 Welcome, ${user.fullName}!`);
       trackAction("USER_AUTHENTICATED", { email: user.email, id: user.id });
     },
-    [showToast]
+    [showToast, loadUserAccounts]
   );
 
   const handleExitToGate = useCallback(() => {

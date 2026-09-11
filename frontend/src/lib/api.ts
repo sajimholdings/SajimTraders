@@ -84,6 +84,8 @@ export const api = {
       `/api/client/account?account_id=${encodeURIComponent(accountId)}`
     ),
 
+  getAccounts: () => requestJson<{ accounts: BackendAccount[] }>("/api/client/accounts"),
+
   getSignals: () => requestJson<SignalsResponse>("/api/client/signals"),
 
   connect: (body: Record<string, unknown>) =>
