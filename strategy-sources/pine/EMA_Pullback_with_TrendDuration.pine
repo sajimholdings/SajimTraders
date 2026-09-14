@@ -1,0 +1,359 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// Combined: "EMA Pullback System - Strategy" + "Trend Duration Forecast [Far_Q]"
+// The Trend Duration Forecast can't run as its own indicator() alongside a strategy()
+// in one file, so it's folded in here as a visual/confirmation layer on top of the
+// strategy, with an optional input to actually gate entries by its trend state.
+
+//@version=6
+strategy("EMA Pullback System + Trend Duration Forecast", overlay = true,
+     initial_capital = 1000,
+     default_qty_type = strategy.percent_of_equity,
+     default_qty_value = 0.5,
+     commission_type = strategy.commission.cash_per_order,
+     commission_value = 0)
+
+// ============================================================
+// INPUTS — EMA Pullback System
+// ============================================================
+riskPercent   = input.float(0.5, "Risk % per trade", minval = 0.1, step = 0.1, group = "EMA Pullback System")
+rrRatio       = input.float(2.0, "Reward:Risk ratio", group = "EMA Pullback System")
+swingLen      = input.int(8, "Swing Lookback", group = "EMA Pullback System")
+minRoomRatio  = input.float(0.8, "Min Room-to-Target Ratio", group = "EMA Pullback System")
+useRoomFilter = input.bool(true, "Use Room-to-Target Filter", group = "EMA Pullback System")
+closeByFriday = input.bool(true, "Force close by Friday", group = "EMA Pullback System")
+fridayHour    = input.int(20, "Friday close hour (exchange time)", group = "EMA Pullback System")
+maxTradesDay  = input.int(2, "Max trades per day", group = "EMA Pullback System")
+
+// ============================================================
+// INPUTS — Trend Duration Forecast
+// ============================================================
+tdLength      = input.int(50, "Smoothing Length", group = "Trend Duration Forecast",
+     tooltip = "Bars used for the HMA. Longer = smoother, more lag.")
+tdTrendLength = input.int(3, "Trend Detection Sensitivity", group = "Trend Duration Forecast",
+     tooltip = "Consecutive bars checked for rising/falling HMA slope.")
+tdSamples     = input.int(10, "Trend Sample Size", minval = 2, group = "Trend Duration Forecast",
+     tooltip = "Past trend durations stored to estimate probable trend length.")
+tdLabelOffsetMult = input.float(0.25, "Label Offset Multiplier", minval = 0.01, step = 0.01,
+     group = "Trend Duration Forecast", tooltip = "Moves trend labels away/closer using ATR distance.")
+coloUP = input.color(color.rgb(18, 228, 158), "↑ Trend", inline = "col", group = "Trend Duration Forecast")
+coloDN = input.color(color.rgb(236, 86, 16), "↓ Trend", inline = "col", group = "Trend Duration Forecast")
+
+// ============================================================
+// INPUTS — Integration
+// ============================================================
+useHmaFilter = input.bool(false, "Require HMA trend alignment for entries", group = "Integration",
+     tooltip = "If enabled, longs only fire when the HMA Trend Duration state is UP, and shorts only when it's DOWN, in addition to the existing H4 EMA bias filter.")
+
+tdLabelOffset = ta.atr(14) * tdLabelOffsetMult
+
+// ============================================================
+// TREND DURATION FORECAST — state
+// ============================================================
+TREND_NONE = 0
+TREND_UP   = 1
+TREND_DOWN = -1
+
+var int tdTrend = TREND_NONE
+var int tdTrendCount = 0
+
+var bullishCount = array.new<int>()
+var bearishCount = array.new<int>()
+
+var label TrendUP = na
+var label TrendDN = na
+var line  LengthLine = na
+var label LabelProbLen = na
+
+avgOrNa(array<int> values) =>
+    array.size(values) > 0 ? array.avg(values) : na
+
+fmtAvg(float value) =>
+    na(value) ? "n/a" : str.tostring(value, "##")
+
+trimSamples(array<int> values, int maxSamples) =>
+    while array.size(values) > maxSamples
+        array.shift(values)
+
+bullText(int count) =>
+    str.tostring(count) + "\nTrend ↑"
+
+bearText(int count) =>
+    "Trend ↓\n" + str.tostring(count)
+
+clearProjection() =>
+    if not na(LengthLine)
+        line.delete(LengthLine)
+    if not na(LabelProbLen)
+        label.delete(LabelProbLen)
+    if not na(TrendUP)
+        label.set_tooltip(TrendUP, "")
+    if not na(TrendDN)
+        label.set_tooltip(TrendDN, "")
+
+updateProjection(float avgLen) =>
+    if not na(LengthLine) and not na(LabelProbLen) and not na(avgLen)
+        x1 = line.get_x1(LengthLine)
+        x2 = x1 + int(math.round(avgLen)) + 1
+        line.set_x2(LengthLine, x2)
+        label.set_x(LabelProbLen, int(math.avg(x1, x2)))
+
+series float hma = ta.hma(close, tdLength)
+series bool hmaRising  = ta.rising(hma, tdTrendLength)
+series bool hmaFalling = ta.falling(hma, tdTrendLength)
+
+if barstate.isconfirmed
+    if hmaRising
+        tdTrend := TREND_UP
+    else if hmaFalling
+        tdTrend := TREND_DOWN
+
+tdPrevTrend = nz(tdTrend[1], TREND_NONE)
+
+tdIsBullish = tdTrend == TREND_UP
+tdIsBearish = tdTrend == TREND_DOWN
+tdHasTrend  = tdTrend != TREND_NONE
+tdTrendChanged = tdHasTrend and tdTrend != tdPrevTrend
+
+if tdTrendChanged
+    completedTrendLength = tdTrendCount
+
+    if tdPrevTrend == TREND_UP
+        array.push(bullishCount, completedTrendLength)
+        trimSamples(bullishCount, tdSamples)
+    else if tdPrevTrend == TREND_DOWN
+        array.push(bearishCount, completedTrendLength)
+        trimSamples(bearishCount, tdSamples)
+
+    clearProjection()
+
+    tdTrendCount := 1
+
+    if tdIsBullish
+        bullAvg = avgOrNa(bullishCount)
+
+        TrendUP := label.new(
+             bar_index - 1, hma[1] - tdLabelOffset,
+             bullText(1),
+             color = color.new(coloUP, 100),
+             textcolor = coloUP,
+             style = label.style_label_up,
+             tooltip = "Current bullish trend length in bars.")
+
+        if not na(TrendDN) and tdPrevTrend == TREND_DOWN
+            label.set_text(TrendDN, bearText(completedTrendLength))
+
+        LengthLine := line.new(
+             bar_index - 1, hma[1], bar_index, hma[1],
+             color = chart.fg_color, style = line.style_arrow_right)
+
+        LabelProbLen := label.new(
+             bar_index, hma[1] - tdLabelOffset,
+             "",
+             style = label.style_label_up,
+             textcolor = chart.fg_color,
+             color = color.new(color.white, 100),
+             tooltip = "Estimated extension of the current bullish trend based on average past durations.")
+    else if tdIsBearish
+        bearAvg = avgOrNa(bearishCount)
+
+        TrendDN := label.new(
+             bar_index - 1, hma[1] + tdLabelOffset,
+             bearText(1),
+             color = color.new(coloDN, 100),
+             textcolor = coloDN,
+             style = label.style_label_down,
+             tooltip = "Current bearish trend length in bars.")
+
+        if not na(TrendUP) and tdPrevTrend == TREND_UP
+            label.set_text(TrendUP, bullText(completedTrendLength))
+
+        LengthLine := line.new(
+             bar_index - 1, hma[1], bar_index, hma[1],
+             color = chart.fg_color, style = line.style_arrow_right)
+
+        LabelProbLen := label.new(
+             bar_index, hma[1] + tdLabelOffset,
+             "",
+             style = label.style_label_down,
+             textcolor = chart.fg_color,
+             color = color.new(color.white, 100),
+             tooltip = "Estimated extension of the current bearish trend based on average past durations.")
+else if tdHasTrend
+    tdTrendCount += 1
+
+if not tdTrendChanged
+    if tdIsBearish and not na(TrendDN)
+        bearAvg = avgOrNa(bearishCount)
+        label.set_text(TrendDN, bearText(tdTrendCount))
+        updateProjection(bearAvg)
+        if not na(LabelProbLen)
+            label.set_text(LabelProbLen, "Probable Length\n" + fmtAvg(bearAvg))
+    else if tdIsBullish and not na(TrendUP)
+        bullAvg = avgOrNa(bullishCount)
+        label.set_text(TrendUP, bullText(tdTrendCount))
+        updateProjection(bullAvg)
+        if not na(LabelProbLen)
+            label.set_text(LabelProbLen, "Probable Length\n" + fmtAvg(bullAvg))
+
+TColor = tdIsBullish ? coloUP : tdIsBearish ? coloDN : chart.fg_color
+plot(hma, "HMA", TColor, linewidth = 2)
+
+var tbl = table.new(position.bottom_right, 100, 100)
+
+if barstate.islast
+    maxRows = math.max(array.size(bullishCount), array.size(bearishCount))
+
+    if maxRows > 0
+        for i = 0 to maxRows - 1
+            tbl.cell(0, i + 1, str.tostring(i + 1), text_color = color.gray,
+                 tooltip = "Sample index (1 = most recent trend)")
+
+            if i == 0
+                tbl.cell(1, i, "Trend ↑", text_color = coloUP,
+                     tooltip = "Bullish trend length samples")
+                tbl.cell(2, i, "Trend ↓", text_color = coloDN,
+                     tooltip = "Bearish trend length samples")
+
+            if i < array.size(bullishCount)
+                lenBull = array.get(bullishCount, i)
+                tbl.cell(1, i + 1, str.tostring(lenBull), text_color = chart.fg_color,
+                     tooltip = "Duration of bullish trend #" + str.tostring(i + 1))
+
+            if i < array.size(bearishCount)
+                lenBear = array.get(bearishCount, i)
+                tbl.cell(2, i + 1, str.tostring(lenBear), text_color = chart.fg_color,
+                     tooltip = "Duration of bearish trend #" + str.tostring(i + 1))
+
+    bullAvg = avgOrNa(bullishCount)
+    bearAvg = avgOrNa(bearishCount)
+
+    tbl.cell(1, array.size(bullishCount) + 1, fmtAvg(bullAvg), text_color = coloUP,
+         tooltip = "Average duration of recent bullish trends")
+    tbl.cell(2, array.size(bearishCount) + 1, fmtAvg(bearAvg), text_color = coloDN,
+         tooltip = "Average duration of recent bearish trends")
+
+// ============================================================
+// EMA PULLBACK SYSTEM — STEP 1: BIAS — H4 trend filter
+// ============================================================
+ema20 = ta.ema(close, 20)
+ema50_h4  = request.security(syminfo.tickerid, "240", ta.ema(close, 50))
+ema200_h4 = request.security(syminfo.tickerid, "240", ta.ema(close, 200))
+
+plot(ema20, title = "EMA 20 (H1)", color = color.yellow, linewidth = 2)
+plot(ema50_h4,  title = "EMA 50 (H4)",  color = color.blue, linewidth = 2)
+plot(ema200_h4, title = "EMA 200 (H4)", color = color.red,  linewidth = 2)
+
+uptrend   = ema50_h4 > ema200_h4
+downtrend = ema50_h4 < ema200_h4
+bgcolor(uptrend ? color.new(color.green, 92) : color.new(color.red, 92))
+
+// ============================================================
+// STEP 2: STRUCTURE — swing high/low detection
+// ============================================================
+swingHigh = ta.pivothigh(high, swingLen, swingLen)
+swingLow  = ta.pivotlow(low, swingLen, swingLen)
+
+var float lastSwingHigh = na
+var float lastSwingLow  = na
+
+if not na(swingHigh)
+    lastSwingHigh := swingHigh
+if not na(swingLow)
+    lastSwingLow := swingLow
+
+plotshape(not na(swingHigh), title = "Swing High", style = shape.xcross,
+     location = location.abovebar, color = color.new(color.orange, 0), size = size.tiny, offset = -swingLen)
+plotshape(not na(swingLow), title = "Swing Low", style = shape.xcross,
+     location = location.belowbar, color = color.new(color.aqua, 0), size = size.tiny, offset = -swingLen)
+
+// ============================================================
+// STEP 3: ENTRY TRIGGER — pullback + engulfing, in trend direction
+// ============================================================
+touchedEMA = low <= ema20 and high >= ema20
+
+bullishEngulf = close > open and close[1] < open[1] and close > open[1] and open < close[1]
+bearishEngulf = close < open and close[1] > open[1] and close < open[1] and open > close[1]
+
+rawLong  = uptrend   and touchedEMA and bullishEngulf
+rawShort = downtrend and touchedEMA and bearishEngulf
+
+// Optional Trend Duration Forecast alignment filter
+hmaOkLong  = not useHmaFilter or tdIsBullish
+hmaOkShort = not useHmaFilter or tdIsBearish
+
+rawLong  := rawLong  and hmaOkLong
+rawShort := rawShort and hmaOkShort
+
+// ============================================================
+// STEP 4: SL / TP calculation with Room-to-Target trimming
+// ============================================================
+var float longSL = na
+var float longTP = na
+var float shortSL = na
+var float shortTP = na
+var bool  longSignal  = false
+var bool  shortSignal = false
+
+longSignal  := false
+shortSignal := false
+
+if rawLong and not na(lastSwingLow)
+    entry = close
+    sl = lastSwingLow
+    stopDist = entry - sl
+    if stopDist > 0
+        tp = entry + stopDist * rrRatio
+        if not na(lastSwingHigh) and lastSwingHigh > entry and lastSwingHigh < tp
+            fullDist = tp - entry
+            roomDist = lastSwingHigh - entry
+            if roomDist / fullDist < minRoomRatio
+                tp := lastSwingHigh - syminfo.mintick * 50
+        if (tp - entry) >= stopDist
+            longSL := sl
+            longTP := tp
+            longSignal := true
+if rawShort and not na(lastSwingHigh)
+    entry = close
+    sl = lastSwingHigh
+    stopDist = sl - entry
+    if stopDist > 0
+        tp = entry - stopDist * rrRatio
+        if not na(lastSwingLow) and lastSwingLow < entry and lastSwingLow > tp
+            fullDist = entry - tp
+            roomDist = entry - lastSwingLow
+            if roomDist / fullDist < minRoomRatio
+                tp := lastSwingLow + syminfo.mintick * 50
+        if (entry - tp) >= stopDist
+            shortSL := sl
+            shortTP := tp
+            shortSignal := true
+
+plotshape(longSignal,  title = "Long Setup",  location = location.belowbar, style = shape.triangleup,   color = color.green, size = size.small)
+plotshape(shortSignal, title = "Short Setup", location = location.abovebar, style = shape.triangledown, color = color.red,   size = size.small)
+
+// ============================================================
+// STEP 5: TRADE MANAGEMENT — daily cap, Friday close, execution
+// ============================================================
+var int tradesToday = 0
+
+newDay = dayofmonth != dayofmonth[1] or month != month[1]
+if newDay
+    tradesToday := 0
+
+isFriday = dayofweek == dayofweek.friday
+fridayCloseTime = isFriday and hour >= fridayHour
+
+if closeByFriday and fridayCloseTime
+    strategy.close_all(comment = "Friday close")
+
+canTrade = not fridayCloseTime and tradesToday < maxTradesDay and strategy.opentrades == 0
+
+if canTrade and longSignal
+    strategy.entry("Long", strategy.long)
+    strategy.exit("Long Exit", "Long", stop = longSL, limit = longTP)
+    tradesToday := tradesToday + 1
+
+if canTrade and shortSignal
+    strategy.entry("Short", strategy.short)
+    strategy.exit("Short Exit", "Short", stop = shortSL, limit = shortTP)
+    tradesToday := tradesToday + 1
