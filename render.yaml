@@ -16,3 +16,16 @@ services:
         sync: false
       - key: ADMIN_KEY
         sync: false
+      - key: CTRADER_CLIENT_ID
+        sync: false
+      - key: CTRADER_CLIENT_SECRET
+        sync: false
+      - key: CTRADER_ACCESS_TOKEN
+        sync: false
+      - key: CTRADER_ACCOUNT_ID
+        sync: false
+      - key: CTRADER_ENVIRONMENT
+        value: demo
+      - key: BROKER_BACKEND
+        value: ctrader
+

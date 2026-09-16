@@ -34,6 +34,7 @@ import MetaTrader5 as mt5
 from v2.coexistence import CoexistenceGatekeeper, MAGIC_V1, MAGIC_V2
 from bots.sajim_server_overnight import SajimOvernightServer
 from v2.sajim_v2_dual_bot import SajimV2DualBot
+from core.ctrader_bridge import CTraderBridge
 
 logger = logging.getLogger("DualOrchestrator")
 logging.basicConfig(
@@ -44,7 +45,7 @@ logging.basicConfig(
 
 class SajimDualOrchestrator:
     """
-    Master Co-Execution Orchestrator for Sajim V1 and Sajim V2.
+    Master Co-Execution Orchestrator for Sajim V1 and Sajim V2 (MT5 & cTrader).
     """
 
     def __init__(
@@ -57,6 +58,7 @@ class SajimDualOrchestrator:
         base_risk_v2: float = 0.012,
         dry_run: bool = False,
         target_account: Optional[int] = None,
+        broker: str = "auto",
     ):
         self.scan_interval = scan_interval_seconds
         self.max_combined = max_combined_positions
@@ -64,6 +66,8 @@ class SajimDualOrchestrator:
         self.max_v2_positions = max_v2_positions
         self.dry_run = dry_run
         self.target_account = target_account
+        self.broker = broker.lower()
+        self.ctrader = CTraderBridge.get_instance()
 
         # Shared Coexistence Gatekeeper
         self.gatekeeper = CoexistenceGatekeeper(
@@ -94,19 +98,43 @@ class SajimDualOrchestrator:
         self.cycle_count = 0
 
     def connect(self) -> bool:
-        """Initializes MT5 terminal and binds both V1 and V2 engines."""
+        """Initializes MT5 terminal or cTrader Cloud Bridge and binds both V1 and V2 engines."""
+        if self.broker == "ctrader":
+            logger.info("[+] Connecting to headless cTrader Open API Cloud Bridge...")
+            if self.ctrader.connect():
+                acc_telemetry = self.ctrader.get_account_telemetry()
+                self.gatekeeper.refresh_account_state(
+                    balance=acc_telemetry["balance"],
+                    equity=acc_telemetry["equity"],
+                    free_margin=acc_telemetry["balance"],
+                    margin_level_pct=1000.0,
+                    currency=acc_telemetry["currency"],
+                    active_positions=self.ctrader.get_positions(),
+                )
+                logger.info(f"[+] cTrader Connected: Account {acc_telemetry['account_id']} | Equity: ${acc_telemetry['equity']:,.2f}")
+                return True
+            return False
+
         # Connect to currently running MT5 terminal first; fallback to launch Headway if closed
-        init_ok = mt5.initialize()
-        if not init_ok:
-            headway_path = r"C:\Program Files\Headway MT5 Terminal\terminal64.exe"
-            if os.path.exists(headway_path):
-                init_ok = mt5.initialize(path=headway_path, timeout=10000)
-            else:
-                terminal_path = r"C:\Program Files\MetaTrader 5\terminal64.exe"
-                init_ok = mt5.initialize(path=terminal_path, timeout=5000) if os.path.exists(terminal_path) else False
+        init_ok = False
+        try:
+            init_ok = mt5.initialize()
+            if not init_ok:
+                headway_path = r"C:\Program Files\Headway MT5 Terminal\terminal64.exe"
+                if os.path.exists(headway_path):
+                    init_ok = mt5.initialize(path=headway_path, timeout=10000)
+                else:
+                    terminal_path = r"C:\Program Files\MetaTrader 5\terminal64.exe"
+                    init_ok = mt5.initialize(path=terminal_path, timeout=5000) if os.path.exists(terminal_path) else False
+        except Exception:
+            init_ok = False
 
         if not init_ok:
-            logger.critical(f"Failed to initialize MT5 terminal: {mt5.last_error()}")
+            if self.broker == "auto":
+                logger.info("[*] MT5 terminal not detected. Seamlessly activating cTrader Open API Cloud Bridge...")
+                self.broker = "ctrader"
+                return self.connect()
+            logger.critical(f"Failed to initialize MT5 terminal: {mt5.last_error() if hasattr(mt5, 'last_error') else 'Not installed'}")
             return False
 
         # Load broker configuration if available
@@ -178,7 +206,20 @@ class SajimDualOrchestrator:
         return True
 
     def sync_gatekeeper(self) -> None:
-        """Synchronizes MT5 live snapshot with the Coexistence Gatekeeper."""
+        """Synchronizes broker live snapshot with the Coexistence Gatekeeper."""
+        if self.broker == "ctrader":
+            telemetry = self.ctrader.get_account_telemetry()
+            positions = self.ctrader.get_positions()
+            self.gatekeeper.refresh_account_state(
+                balance=telemetry["balance"],
+                equity=telemetry["equity"],
+                free_margin=telemetry["balance"],
+                margin_level_pct=1000.0,
+                currency=telemetry["currency"],
+                active_positions=positions,
+            )
+            return
+
         acc = mt5.account_info()
         positions = mt5.positions_get() or []
         today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)

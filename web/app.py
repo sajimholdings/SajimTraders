@@ -29,6 +29,8 @@ if ROOT_DIR not in sys.path:
 
 from core.supabase_bridge import SupabaseBridge
 from core.credential_vault import encrypt_password
+from core.ctrader_bridge import CTraderBridge
+from core.investor_reporting import InvestorReporting
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("SajimFastAPI")
@@ -313,3 +315,41 @@ def sammy_check(
 @app.post("/api/toggles")
 def toggles(body: dict, _: None = Depends(require_admin)):
     return {"status": "SUCCESS", "toggles": body}
+
+
+# ---------------------------------------------------------------------------
+# Institutional Investor & cTrader Endpoints
+# ---------------------------------------------------------------------------
+@app.get("/api/v2/investor/metrics")
+def investor_metrics():
+    """Returns top-level mathematical edge verification for investors."""
+    pkg = InvestorReporting.generate_investor_package()
+    return pkg["evaluation"]["portfolio"]
+
+
+@app.get("/api/v2/investor/bots")
+def investor_bots():
+    """Returns per-bot alpha attribution (V1 vs V2 Surge vs V2 Reversion)."""
+    pkg = InvestorReporting.generate_investor_package()
+    return pkg["evaluation"]["bots"]
+
+
+@app.get("/api/v2/investor/projections")
+def investor_projections():
+    """Returns mathematical capital scaling projections (30d, 90d, 180d, 1yr)."""
+    pkg = InvestorReporting.generate_investor_package()
+    return pkg["evaluation"]["portfolio"]["investor_projections"]
+
+
+@app.get("/api/v2/investor/package")
+def investor_full_package():
+    """Returns the full quantitative investor deck and account telemetry."""
+    return InvestorReporting.generate_investor_package()
+
+
+@app.get("/api/v2/ctrader/telemetry")
+def ctrader_telemetry():
+    """Provides live cTrader Cloud Bridge telemetry & open position breakdown."""
+    bridge_inst = CTraderBridge.get_instance()
+    return bridge_inst.get_account_telemetry()
+

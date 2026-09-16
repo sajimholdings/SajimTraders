@@ -154,6 +154,7 @@ def cmd_dual(args):
         base_risk_v2=getattr(args, 'risk_v2', 0.012),
         dry_run=not args.live,
         target_account=getattr(args, 'account', None),
+        broker=getattr(args, 'broker', 'auto'),
     )
 
     if orchestrator.connect():
@@ -166,7 +167,13 @@ def cmd_dual(args):
         except KeyboardInterrupt:
             print("\n[+] Dual Orchestrator stopped by operator.")
         finally:
-            mt5.shutdown()
+            if orchestrator.broker != "ctrader":
+                try:
+                    mt5.shutdown()
+                except Exception:
+                    pass
+            else:
+                orchestrator.ctrader.disconnect()
 
 
 def cmd_edge(args):
@@ -243,6 +250,43 @@ def cmd_web(args):
     import uvicorn
     from web.app import app
     uvicorn.run(app, host="0.0.0.0", port=args.port)
+
+
+def cmd_ctrader(args):
+    print("[*] Initializing cTrader Open API Cloud Bridge...")
+    from core.ctrader_bridge import CTraderBridge
+    bridge = CTraderBridge.get_instance()
+    connected = bridge.connect()
+    if not connected:
+        print("[!] Failed to connect to cTrader Open API.")
+        return
+    telemetry = bridge.get_account_telemetry()
+    print("[+] cTrader Connected Successfully!")
+    print(f"    - Broker Environment : {telemetry['broker']} ({telemetry['environment']})")
+    print(f"    - Account ID         : {telemetry['account_id']}")
+    print(f"    - Equity / Balance   : ${telemetry['equity']:,.2f} / ${telemetry['balance']:,.2f} {telemetry['currency']}")
+    print(f"    - Active Positions   : {telemetry['total_open_positions']}")
+
+    if getattr(args, 'test', False):
+        print("\n[*] Exercising Multi-Bot Execution Test on cTrader...")
+        o1 = bridge.send_order("XAUUSD", "BUY", 0.01, 2685.50, 2675.0, 2700.0, label="SAJIM_V1", comment="Test_V1")
+        o2 = bridge.send_order("EURJPY", "SELL", 0.02, 162.35, 163.0, 161.0, label="SAJIM_V2_SURGE", comment="Test_V2_Surge")
+        print(f"[+] V1 Order: #{o1['ticket']} ({o1['label']}) | Status: {o1['status']}")
+        print(f"[+] V2 Order: #{o2['ticket']} ({o2['label']}) | Status: {o2['status']}")
+
+        print("\n[*] Testing Hummingbird Peak Harvest on V1...")
+        c1 = bridge.close_position(o1['ticket'], reason="Hummingbird_Harvest_Test", close_price=2688.0)
+        print(f"[+] Closed deal: #{o1['ticket']} | PnL: ${c1['deal']['profit']:+.2f} USD (+{c1['deal']['r_multiple']:.2f}R)")
+
+        updated = bridge.get_account_telemetry()
+        print(f"\n[+] Updated cTrader Equity: ${updated['equity']:,.2f} | Bot Breakdown: {updated['bot_breakdown']}")
+
+
+def cmd_investor(args):
+    print("[*] Generating Quantitative Investor Deck & Raw Math Audit...")
+    from core.investor_reporting import InvestorReporting
+    pkg = InvestorReporting.generate_investor_package(initial_capital=getattr(args, 'capital', 10000.0))
+    print(InvestorReporting.render_executive_card(pkg))
 
 
 def main():
@@ -342,23 +386,37 @@ def main():
     p_web = subparsers.add_parser("web", help="Launch Sajim Traders Institutional Web App Terminal")
     p_web.add_argument("--port", type=int, default=8080, help="Port to bind web server (default: 8080)")
 
+    # 12. cTrader Open API Cloud Bridge
+    p_ct = subparsers.add_parser("ctrader", help="cTrader Open API Headless Cloud Bridge")
+    p_ct.add_argument("--test", action="store_true", help="Run sandbox multi-bot order and harvest test")
+
+    # 13. Institutional Investor Audit Deck
+    p_inv = subparsers.add_parser("investor", help="Generate Quantitative Investor Deck & Raw Math Audit")
+    p_inv.add_argument("--capital", type=float, default=10000.0, help="Starting capital base (default: 10000.0)")
+
+    # Add --broker flags to bot runners
+    for p in (p_v1, p_v2, p_dual, p_srv):
+        p.add_argument("--broker", type=str, choices=["auto", "ctrader", "mt5"], default="auto", help="Execution broker backend (default: auto)")
+
     args = parser.parse_args()
 
     if not args.command:
         parser.print_help()
         print("\nQuick Start Examples:")
+        print("  python run.py investor              # Generate Institutional Investor Audit Deck")
+        print("  python run.py ctrader --test        # Test cTrader Cloud Bridge & Multi-Bot Order Routing")
+        print("  python run.py dual --broker ctrader # Run V1 and V2 concurrently on cTrader")
         print("  python run.py web                   # Launch Sajim Traders Web Terminal")
         print("  python run.py omniverse             # Run Omniverse Anomaly Scanner (Dry Run)")
         print("  python run.py cent --symbol XAUUSD  # Run Cent Flip Executor on Gold")
         print("  python run.py propfirm --size 100000 # Run Prop Firm Challenge Bot")
-        print("  python run.py scanner               # Run Institutional Cross-Asset Matrix Scanner")
-        print("  python run.py server                # Run Overnight Server Daemon")
-        print("  python run.py digest                # Publish Daily Market & Pair Health Digest")
         print("  python run.py test                  # Run Full Verification Suite\n")
         return
 
     commands = {
         "web": cmd_web,
+        "ctrader": cmd_ctrader,
+        "investor": cmd_investor,
         "dual": cmd_dual,
         "v2": cmd_v2,
         "edge": cmd_edge,

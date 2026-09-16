@@ -106,6 +106,50 @@ class CoexistenceGatekeeper:
                 currencies.append(curr)
         return currencies if currencies else ["OTHER"]
 
+    def refresh_account_state(
+        self,
+        balance: float,
+        equity: float,
+        free_margin: float,
+        margin_level_pct: float = 9999.0,
+        currency: str = "USD",
+        active_positions: Optional[List[Dict[str, Any]]] = None,
+        today_deals: Optional[List[Dict[str, Any]]] = None,
+    ) -> None:
+        """
+        Direct dictionary-based state refresh, native to cTrader and cloud engines.
+        """
+        self.account_balance = float(balance)
+        self.account_equity = float(equity)
+        self.account_margin_free = float(free_margin)
+        self.account_margin_level = float(margin_level_pct)
+        self.currency = currency
+
+        self.v1_positions.clear()
+        self.v2_positions.clear()
+        self.other_positions.clear()
+        total_float = 0.0
+
+        for p in (active_positions or []):
+            profit = float(p.get("profit", 0.0))
+            total_float += profit
+            label = str(p.get("label", ""))
+            if "V1" in label or p.get("magic") == MAGIC_V1:
+                self.v1_positions.append(p)
+            elif "V2" in label or p.get("magic") == MAGIC_V2:
+                self.v2_positions.append(p)
+            else:
+                self.other_positions.append(p)
+
+        self.today_floating_pnl = round(total_float, 2)
+        closed_pnl = sum(float(d.get("profit", 0.0)) for d in (today_deals or []))
+        self.today_closed_pnl = round(closed_pnl, 2)
+
+        if self.account_equity > self.high_watermark_equity:
+            self.high_watermark_equity = self.account_equity
+
+        self.save_status()
+
     def refresh(
         self,
         account_info: Any,

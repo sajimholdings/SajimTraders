@@ -8,6 +8,11 @@ uvicorn[standard]>=0.29.0
 supabase>=2.5.0
 cryptography>=42.0.0
 
+# cTrader Open API Cloud Requirements (Pure Python Linux/Render compatible)
+protobuf>=3.20.0
+websockets>=12.0.0
+
 # NOTE: MetaTrader5 is a Windows-only package and is NOT installable on Linux/Render.
 # Install it on the Windows bridge host only (see requirements-windows.txt).
+
 
