@@ -80,3 +80,6 @@ v2/coexistence_status.json
 
 # Decluttered files (kept on disk, not tracked)
 archives/
+
+# Session/conversation transcripts (sensitive tier; kept local-only by decision)
+docs/conversation_history/
