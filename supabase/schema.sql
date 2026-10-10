@@ -51,6 +51,7 @@ CREATE TABLE IF NOT EXISTS public.trading_accounts (
     today_pnl NUMERIC(10, 2) DEFAULT 0.00,
     today_pnl_percent NUMERIC(6, 2) DEFAULT 0.00,
     floating_pnl NUMERIC(10, 2) DEFAULT 0.00,
+    margin_level NUMERIC(12, 2) DEFAULT 0.00,
     terminal_connected BOOLEAN DEFAULT FALSE,
     
     -- Encrypted Credentials / Token Vault
@@ -59,7 +60,8 @@ CREATE TABLE IF NOT EXISTS public.trading_accounts (
     created_at TIMESTAMPTZ DEFAULT TIMEZONE('utc', NOW()) NOT NULL,
     updated_at TIMESTAMPTZ DEFAULT TIMEZONE('utc', NOW()) NOT NULL,
 
-    UNIQUE(user_id, account_id, broker_server)
+    -- An MT5 login on a given server can be linked by exactly ONE user.
+    CONSTRAINT trading_accounts_account_server_key UNIQUE (account_id, broker_server)
 );
 
 CREATE INDEX IF NOT EXISTS idx_trading_accounts_user ON public.trading_accounts(user_id);
@@ -90,6 +92,7 @@ CREATE TABLE IF NOT EXISTS public.signals (
 );
 
 CREATE INDEX IF NOT EXISTS idx_signals_active ON public.signals(is_active, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_signals_expires ON public.signals(expires_at);
 
 -- ========================================================================================
 -- 5. ORDERS & EXECUTION QUEUE (1-Tap & Auto-Pilot Dispatches)
@@ -105,7 +108,7 @@ CREATE TABLE IF NOT EXISTS public.orders_queue (
     sl NUMERIC(12, 5),
     tp NUMERIC(12, 5),
     comment TEXT DEFAULT 'Sajim_1Tap',
-    status TEXT DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'PROCESSING', 'FILLED', 'REJECTED', 'CLOSED')),
+    status TEXT DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'PROCESSING', 'FILLED', 'REJECTED', 'FAILED', 'CLOSED')),
     mt5_ticket BIGINT,
     close_ticket BIGINT,
     open_price NUMERIC(12, 5),
@@ -140,10 +143,65 @@ CREATE TABLE IF NOT EXISTS public.trade_history (
     net_pnl NUMERIC(10, 2) NOT NULL,
     open_time TIMESTAMPTZ NOT NULL,
     close_time TIMESTAMPTZ DEFAULT TIMEZONE('utc', NOW()) NOT NULL,
-    comment TEXT
+    comment TEXT,
+
+    -- One history row per closed MT5 position (bridge reconciliation is idempotent).
+    CONSTRAINT trade_history_account_ticket_key UNIQUE (account_id, mt5_ticket)
 );
 
 CREATE INDEX IF NOT EXISTS idx_trade_history_user ON public.trade_history(user_id, close_time DESC);
+
+-- ========================================================================================
+-- 6b. IDEMPOTENT MIGRATIONS (safe to re-run on databases created by older schema.sql)
+-- ========================================================================================
+ALTER TABLE public.trading_accounts ADD COLUMN IF NOT EXISTS margin_level NUMERIC(12, 2) DEFAULT 0.00;
+ALTER TABLE public.trading_accounts ADD COLUMN IF NOT EXISTS floating_pnl NUMERIC(10, 2) DEFAULT 0.00;
+ALTER TABLE public.signals ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ;
+ALTER TABLE public.orders_queue ADD COLUMN IF NOT EXISTS close_ticket BIGINT;
+
+ALTER TABLE public.orders_queue DROP CONSTRAINT IF EXISTS orders_queue_action_check;
+ALTER TABLE public.orders_queue ADD CONSTRAINT orders_queue_action_check
+    CHECK (action IN ('BUY', 'SELL', 'CLOSE'));
+ALTER TABLE public.orders_queue DROP CONSTRAINT IF EXISTS orders_queue_status_check;
+ALTER TABLE public.orders_queue ADD CONSTRAINT orders_queue_status_check
+    CHECK (status IN ('PENDING', 'PROCESSING', 'FILLED', 'REJECTED', 'FAILED', 'CLOSED'));
+
+-- Exclusive MT5 ownership: replace the old per-user UNIQUE(user_id, account_id, broker_server)
+-- with UNIQUE(account_id, broker_server).
+-- NOTE: if two users already linked the same login+server, this ADD CONSTRAINT fails. Resolve
+-- duplicates first, e.g.:
+--   SELECT account_id, broker_server, array_agg(user_id) FROM public.trading_accounts
+--   GROUP BY 1, 2 HAVING count(*) > 1;
+ALTER TABLE public.trading_accounts DROP CONSTRAINT IF EXISTS trading_accounts_user_id_account_id_broker_server_key;
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'trading_accounts_account_server_key'
+          AND conrelid = 'public.trading_accounts'::regclass
+    ) THEN
+        ALTER TABLE public.trading_accounts
+            ADD CONSTRAINT trading_accounts_account_server_key UNIQUE (account_id, broker_server);
+    END IF;
+END $$;
+
+-- De-duplicate trade_history (keep the earliest row per account/ticket), then enforce uniqueness.
+DELETE FROM public.trade_history a
+USING public.trade_history b
+WHERE a.account_id = b.account_id
+  AND a.mt5_ticket = b.mt5_ticket
+  AND (a.close_time, a.id) > (b.close_time, b.id);
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'trade_history_account_ticket_key'
+          AND conrelid = 'public.trade_history'::regclass
+    ) THEN
+        ALTER TABLE public.trade_history
+            ADD CONSTRAINT trade_history_account_ticket_key UNIQUE (account_id, mt5_ticket);
+    END IF;
+END $$;
 
 -- ========================================================================================
 -- 7. ROW LEVEL SECURITY (RLS) POLICIES
@@ -159,10 +217,18 @@ DROP POLICY IF EXISTS "Users can view own profile" ON public.profiles;
 CREATE POLICY "Users can view own profile" ON public.profiles FOR SELECT USING (auth.uid() = id);
 
 DROP POLICY IF EXISTS "Users can update own profile" ON public.profiles;
-CREATE POLICY "Users can update own profile" ON public.profiles FOR UPDATE USING (auth.uid() = id);
+-- Users may update their own profile but can NOT change their role (no self-promotion to admin).
+CREATE POLICY "Users can update own profile" ON public.profiles FOR UPDATE
+    USING (auth.uid() = id)
+    WITH CHECK (
+        auth.uid() = id
+        AND role IS NOT DISTINCT FROM (SELECT p.role FROM public.profiles p WHERE p.id = auth.uid())
+    );
 
+-- Self-inserted profiles are always plain traders (handle_new_user normally creates the row).
 DROP POLICY IF EXISTS "Users can insert own profile" ON public.profiles;
-CREATE POLICY "Users can insert own profile" ON public.profiles FOR INSERT WITH CHECK (auth.uid() = id);
+CREATE POLICY "Users can insert own profile" ON public.profiles FOR INSERT
+    WITH CHECK (auth.uid() = id AND COALESCE(role, 'trader') = 'trader');
 
 -- Trading Accounts Policies
 DROP POLICY IF EXISTS "Users can view own trading accounts" ON public.trading_accounts;
@@ -172,25 +238,106 @@ DROP POLICY IF EXISTS "Users can insert own trading accounts" ON public.trading_
 CREATE POLICY "Users can insert own trading accounts" ON public.trading_accounts FOR INSERT WITH CHECK (auth.uid() = user_id);
 
 DROP POLICY IF EXISTS "Users can update own trading accounts" ON public.trading_accounts;
-CREATE POLICY "Users can update own trading accounts" ON public.trading_accounts FOR UPDATE USING (auth.uid() = user_id);
+CREATE POLICY "Users can update own trading accounts" ON public.trading_accounts FOR UPDATE
+    USING (auth.uid() = user_id)
+    WITH CHECK (auth.uid() = user_id);
 
 DROP POLICY IF EXISTS "Users can delete own trading accounts" ON public.trading_accounts;
 CREATE POLICY "Users can delete own trading accounts" ON public.trading_accounts FOR DELETE USING (auth.uid() = user_id);
 
--- Signals Policies (Public read for active signals)
-DROP POLICY IF EXISTS "Anyone can view active signals" ON public.signals;
-CREATE POLICY "Anyone can view active signals" ON public.signals FOR SELECT USING (is_active = TRUE);
+-- Signals Policies: see "Anyone can view active signals" below (active + unexpired only).
 
 -- Orders Queue Policies
 DROP POLICY IF EXISTS "Users can view own orders" ON public.orders_queue;
 CREATE POLICY "Users can view own orders" ON public.orders_queue FOR SELECT USING (auth.uid() = user_id);
 
 DROP POLICY IF EXISTS "Users can insert own orders" ON public.orders_queue;
-CREATE POLICY "Users can insert own orders" ON public.orders_queue FOR INSERT WITH CHECK (auth.uid() = user_id);
+-- Users can only queue PENDING orders, for accounts they own.
+CREATE POLICY "Users can insert own orders" ON public.orders_queue FOR INSERT WITH CHECK (
+    auth.uid() = user_id
+    AND status = 'PENDING'
+    AND EXISTS (
+        SELECT 1 FROM public.trading_accounts ta
+        WHERE ta.user_id = auth.uid()
+          AND ta.account_id = orders_queue.account_id
+          AND (orders_queue.trading_account_id IS NULL OR ta.id = orders_queue.trading_account_id)
+    )
+);
+
+-- Signals: only the service role (bypasses RLS) may write; also hide expired signals.
+DROP POLICY IF EXISTS "Anyone can view active signals" ON public.signals;
+CREATE POLICY "Anyone can view active signals" ON public.signals FOR SELECT
+    USING (is_active = TRUE AND (expires_at IS NULL OR expires_at > NOW()));
 
 -- Trade History Policies
 DROP POLICY IF EXISTS "Users can view own trade history" ON public.trade_history;
 CREATE POLICY "Users can view own trade history" ON public.trade_history FOR SELECT USING (auth.uid() = user_id);
+
+-- ========================================================================================
+-- 7b. COLUMN GUARDS (authenticated clients cannot forge server-owned fields)
+-- ========================================================================================
+-- RLS is row-level; these triggers make server-owned columns immutable for browser
+-- (role 'authenticated' / 'anon') writes. The service role (API + bridge) is unaffected.
+CREATE OR REPLACE FUNCTION public.guard_profile_role()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    IF COALESCE(auth.role(), '') IN ('authenticated', 'anon')
+       AND NEW.role IS DISTINCT FROM OLD.role THEN
+        RAISE EXCEPTION 'role cannot be changed by the user';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_guard_profile_role ON public.profiles;
+CREATE TRIGGER trg_guard_profile_role
+    BEFORE UPDATE ON public.profiles
+    FOR EACH ROW EXECUTE PROCEDURE public.guard_profile_role();
+
+CREATE OR REPLACE FUNCTION public.guard_trading_account_telemetry()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    IF COALESCE(auth.role(), '') IN ('authenticated', 'anon') THEN
+        IF TG_OP = 'UPDATE' THEN
+            -- Telemetry, ownership and credentials are server-owned.
+            NEW.user_id            := OLD.user_id;
+            NEW.account_id         := OLD.account_id;
+            NEW.broker_server      := OLD.broker_server;
+            NEW.balance            := OLD.balance;
+            NEW.equity             := OLD.equity;
+            NEW.free_margin        := OLD.free_margin;
+            NEW.margin_level       := OLD.margin_level;
+            NEW.today_pnl          := OLD.today_pnl;
+            NEW.today_pnl_percent  := OLD.today_pnl_percent;
+            NEW.floating_pnl       := OLD.floating_pnl;
+            NEW.terminal_connected := OLD.terminal_connected;
+            NEW.last_sync_at       := OLD.last_sync_at;
+            NEW.encrypted_password := OLD.encrypted_password;
+            NEW.max_lot            := OLD.max_lot;
+        ELSIF TG_OP = 'INSERT' THEN
+            NEW.balance            := 0;
+            NEW.equity             := 0;
+            NEW.free_margin        := 0;
+            NEW.margin_level       := 0;
+            NEW.today_pnl          := 0;
+            NEW.today_pnl_percent  := 0;
+            NEW.floating_pnl       := 0;
+            NEW.terminal_connected := FALSE;
+            NEW.max_lot            := 0.05;
+        END IF;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_guard_trading_account_telemetry ON public.trading_accounts;
+CREATE TRIGGER trg_guard_trading_account_telemetry
+    BEFORE INSERT OR UPDATE ON public.trading_accounts
+    FOR EACH ROW EXECUTE PROCEDURE public.guard_trading_account_telemetry();
 
 -- ========================================================================================
 -- 8. AUTOMATIC PROFILE CREATION TRIGGER (Official Supabase Standard)
@@ -237,35 +384,15 @@ BEGIN
 END $$;
 
 -- ========================================================================================
--- 10. SEED INITIAL SIGNAL
+-- 10. REMOVE LEGACY SEED SIGNAL
 -- ========================================================================================
-INSERT INTO public.signals (
-    id, symbol, timeframe, action, entry, sl, tp, rr, strategy, phase, win_probability, gain_estimate_usd, risk_estimate_usd, trade_health_pct, trade_explainer, is_active
-) VALUES (
-    'SIG_XAU_LIVE_01',
-    'XAUUSD',
-    'M1',
-    'BUY',
-    2684.50,
-    2679.50,
-    2698.00,
-    '1:2.7',
-    'Kinetic Micro-Surge',
-    'YOUNG_SURGE',
-    '88.4%',
-    '+$13.50',
-    '-$5.00',
-    89,
-    'Early trend surge detected on dynamic baseline. Enters at low maturity with +0.35R Breakeven Shield protection.',
-    TRUE
-) ON CONFLICT (id) DO UPDATE SET is_active = TRUE;
+-- Earlier versions seeded a static 'SIG_XAU_LIVE_01' signal that autopilot could mirror as
+-- if it were live. Signals now come only from scripts/signal_generator.py (with expires_at).
+DELETE FROM public.signals WHERE id = 'SIG_XAU_LIVE_01';
 
 -- ========================================================================================
--- MIGRATION NOTES (only if schema.sql was applied BEFORE the CLOSE-order support was added)
+-- MIGRATION NOTES
 -- ========================================================================================
--- ALTER TABLE public.orders_queue ADD COLUMN IF NOT EXISTS close_ticket BIGINT;
--- To widen the action CHECK on an existing table:
---   ALTER TABLE public.orders_queue DROP CONSTRAINT IF EXISTS orders_queue_action_check;
---   ALTER TABLE public.orders_queue ADD CONSTRAINT orders_queue_action_check
---       CHECK (action IN ('BUY', 'SELL', 'CLOSE'));
+-- All migrations are applied idempotently in section 6b above; re-running this whole file
+-- on an existing database is safe (resolve duplicate account ownership first, see 6b).
 -- ========================================================================================

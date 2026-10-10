@@ -97,8 +97,18 @@ class MetaTraderBridge:
             return []
         return [float(r['close']) for r in rates]
 
-    def run_live_cycle(self, symbol: str = "XAUUSD", style: str = "INTRADAY", account_balance: float = 400.0):
-        """Executes a complete scan -> BEEP Institutional Narrative -> Sammy 4-Check -> MT5 execution cycle."""
+    def run_live_cycle(
+        self,
+        symbol: str = "XAUUSD",
+        style: str = "INTRADAY",
+        account_balance: float = 400.0,
+        dry_run: bool = True,
+    ):
+        """Executes a complete scan -> BEEP Institutional Narrative -> Sammy 4-Check -> MT5 execution cycle.
+
+        dry_run defaults to True: the order is only printed. Pass dry_run=False (or run the
+        module with --live) to actually send it to the order gateway.
+        """
         print("\n" + "=" * 65)
         print(f"[*] Starting BEEP Institutional Narrative Scan for {symbol} [{style}]")
         print("=" * 65)
@@ -161,6 +171,13 @@ class MetaTraderBridge:
         print("[+] Narrative broadcast alert queued for Tete's channel.")
 
         # 6. Place Order on MT5 with Asymmetric R:R
+        if dry_run:
+            print(
+                f"[DRY-RUN] Would place {narrative['trade_action']} {narrative['lot_size']} {symbol} "
+                f"SL={narrative['invalidation_sl']} TP={narrative['target_2']} (pass --live to execute)."
+            )
+            return
+
         print("[*] Placing order into MT5 terminal with 1:3.5 Target...")
         order_res = self.client.place_mt5_order(
             symbol=symbol,
@@ -173,6 +190,7 @@ class MetaTraderBridge:
 
 
 if __name__ == "__main__":
+    live = "--live" in sys.argv[1:]
     bridge = MetaTraderBridge()
     bridge.initialize()
-    bridge.run_live_cycle(symbol="XAUUSD", style="SWING", account_balance=1000.0)
+    bridge.run_live_cycle(symbol="XAUUSD", style="SWING", account_balance=1000.0, dry_run=not live)

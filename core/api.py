@@ -10,6 +10,7 @@ Exposes:
   - MT5 Integration Status & Order Bridge
 """
 
+import hmac
 import json
 import os
 import sys
@@ -27,19 +28,35 @@ for p in (ROOT_DIR, BASE_DIR, os.path.join(ROOT_DIR, "vault")):
     if p not in sys.path:
         sys.path.insert(0, p)
 
+# The proprietary BEEP engines are optional: the gateway must still import (and serve
+# /health + auth-gated 503s) when they are not deployed alongside this module.
 try:
-    from core.beep_core import BeepCoreEngine
-    from core.beep_narrative import BeepNarrativeEngine
-    from core.beep_matrix_scanner import BeepMatrixScanner
-    from core.beep_broadcast import BeepBroadcastBus, BROADCAST_LOG
-    from core.beep_signal_engine import BeepSignalEngine, get_market_session
+    try:
+        from core.beep_core import BeepCoreEngine
+        from core.beep_narrative import BeepNarrativeEngine
+        from core.beep_matrix_scanner import BeepMatrixScanner
+        from core.beep_broadcast import BeepBroadcastBus, BROADCAST_LOG
+        from core.beep_signal_engine import BeepSignalEngine, get_market_session
+    except ImportError:
+        from beep_core import BeepCoreEngine
+        from beep_narrative import BeepNarrativeEngine
+        from beep_matrix_scanner import BeepMatrixScanner
+        from beep_broadcast import BeepBroadcastBus, BROADCAST_LOG
+        from beep_signal_engine import BeepSignalEngine, get_market_session
+    BEEP_ENGINES_AVAILABLE = True
+except ImportError as _beep_err:
+    logger.warning(f"BEEP engines unavailable ({_beep_err}); analysis endpoints will return 503.")
+    BeepCoreEngine = BeepNarrativeEngine = BeepMatrixScanner = BeepBroadcastBus = BeepSignalEngine = None
+    BROADCAST_LOG = ""
+    BEEP_ENGINES_AVAILABLE = False
+
+    def get_market_session() -> str:
+        return "UNKNOWN"
+
+try:
+    from vault_original_beep.raw_beep_equations import OriginalRawBeep
 except ImportError:
-    from beep_core import BeepCoreEngine
-    from beep_narrative import BeepNarrativeEngine
-    from beep_matrix_scanner import BeepMatrixScanner
-    from beep_broadcast import BeepBroadcastBus, BROADCAST_LOG
-    from beep_signal_engine import BeepSignalEngine, get_market_session
-from vault_original_beep.raw_beep_equations import OriginalRawBeep
+    OriginalRawBeep = None
 
 # Configuration & Security Keys (loaded from environment only — no hardcoded secrets)
 API_PORT = int(os.environ.get("BEEP_API_PORT", 8080))
@@ -58,12 +75,31 @@ MASTER_OVERRIDE_KEY = os.environ.get("BEEP_MASTER_KEY", "")
 DISPATCHED_ALERTS: List[Dict[str, Any]] = []
 
 # Initialize isolated BEEP engines
-engine = BeepCoreEngine()
-narrative_engine = BeepNarrativeEngine()
-matrix_scanner = BeepMatrixScanner()
-broadcast_bus = BeepBroadcastBus()
-signal_engine = BeepSignalEngine()
-raw_beep = OriginalRawBeep()
+engine = BeepCoreEngine() if BeepCoreEngine else None
+narrative_engine = BeepNarrativeEngine() if BeepNarrativeEngine else None
+matrix_scanner = BeepMatrixScanner() if BeepMatrixScanner else None
+broadcast_bus = BeepBroadcastBus() if BeepBroadcastBus else None
+signal_engine = BeepSignalEngine() if BeepSignalEngine else None
+raw_beep = OriginalRawBeep() if OriginalRawBeep else None
+
+# Routes that need a specific engine (path -> engine object). Missing engine -> 503.
+_ENGINE_REQUIREMENTS = {
+    "/v1/broadcast/pending": lambda: broadcast_bus,
+    "/v1/market/matrix": lambda: signal_engine,
+    "/v1/matrix/scan": lambda: matrix_scanner,
+    "/v1/verify": lambda: raw_beep and signal_engine,
+    "/v1/signal": lambda: engine,
+    "/v1/narrative": lambda: narrative_engine,
+    "/v1/portfolio/evaluate": lambda: engine,
+    "/v1/sammy-4check": lambda: engine,
+}
+
+
+def _engine_missing(path: str) -> bool:
+    for prefix, getter in _ENGINE_REQUIREMENTS.items():
+        if path == prefix or path.startswith(prefix + "?"):
+            return not getter()
+    return False
 
 
 class BeepApiHandler(BaseHTTPRequestHandler):
@@ -82,9 +118,24 @@ class BeepApiHandler(BaseHTTPRequestHandler):
         self._send_json(200, {"status": "ok"})
 
     def _authenticate(self) -> bool:
-        """Verifies API key from header."""
-        api_key = self.headers.get("X-BEEP-API-KEY")
-        return bool(api_key and api_key in VALID_API_KEYS)
+        """Verifies API key from header (constant-time comparison against each key)."""
+        return self._caller_role() is not None
+
+    def _caller_role(self):
+        api_key = self.headers.get("X-BEEP-API-KEY") or ""
+        if not api_key:
+            return None
+        role = None
+        for valid_key, valid_role in VALID_API_KEYS.items():
+            if hmac.compare_digest(api_key.encode("utf-8"), valid_key.encode("utf-8")):
+                role = valid_role
+        return role
+
+    def _is_master(self) -> bool:
+        api_key = self.headers.get("X-BEEP-API-KEY") or ""
+        return bool(MASTER_OVERRIDE_KEY and api_key) and hmac.compare_digest(
+            api_key.encode("utf-8"), MASTER_OVERRIDE_KEY.encode("utf-8")
+        )
 
     def do_GET(self):
         if self.path in ["/", "/health"]:
@@ -98,6 +149,13 @@ class BeepApiHandler(BaseHTTPRequestHandler):
                 "portfolio_engine": "Active",
                 "auth_required": True,
             })
+            return
+
+        elif _engine_missing(self.path):
+            if not self._authenticate():
+                self._send_json(401, {"error": "Unauthorized."})
+                return
+            self._send_json(503, {"error": "BEEP engine not available on this deployment."})
             return
 
         # Tete can pull pending broadcast messages
@@ -117,6 +175,9 @@ class BeepApiHandler(BaseHTTPRequestHandler):
         elif self.path == "/v1/broadcast/stream":
             if not self._authenticate():
                 self._send_json(401, {"error": "Unauthorized."})
+                return
+            if not BROADCAST_LOG:
+                self._send_json(503, {"error": "BEEP broadcast bus not available on this deployment."})
                 return
             events = []
             if os.path.exists(BROADCAST_LOG):
@@ -221,7 +282,11 @@ class BeepApiHandler(BaseHTTPRequestHandler):
             })
             return
 
-        caller_name = VALID_API_KEYS.get(self.headers.get("X-BEEP-API-KEY"), "Unknown")
+        caller_name = self._caller_role() or "Unknown"
+
+        if _engine_missing(self.path):
+            self._send_json(503, {"error": "BEEP engine not available on this deployment."})
+            return
 
         try:
             content_length = int(self.headers.get("Content-Length", 0))
@@ -529,6 +594,10 @@ class BeepApiHandler(BaseHTTPRequestHandler):
         # ROUTE 5: /v1/mt5/order -> Order Execution Gateway
         # ---------------------------------------------------------------------
         elif self.path == "/v1/mt5/order":
+            # Places LIVE orders: restricted to the master key only.
+            if not self._is_master():
+                self._send_json(403, {"error": "Forbidden: master key required for order execution."})
+                return
             symbol = body.get("symbol", "XAUUSD")
             direction = body.get("direction", "BUY")
             lot = float(body.get("lot", 0.01))
@@ -539,7 +608,7 @@ class BeepApiHandler(BaseHTTPRequestHandler):
             try:
                 import MetaTrader5 as mt5
                 if mt5.initialize():
-                    action = mt5.ORDER_BUY if direction.upper() == "BUY" else mt5.ORDER_SELL
+                    action = mt5.ORDER_TYPE_BUY if direction.upper() == "BUY" else mt5.ORDER_TYPE_SELL
                     price = mt5.symbol_info_tick(symbol).ask if direction.upper() == "BUY" else mt5.symbol_info_tick(symbol).bid
                     request = {
                         "action": mt5.TRADE_ACTION_DEAL,
@@ -583,8 +652,7 @@ class BeepApiHandler(BaseHTTPRequestHandler):
         # ROUTE 6: /v1/override -> Founder Unilateral Override
         # ---------------------------------------------------------------------
         elif self.path == "/v1/override":
-            provided_key = self.headers.get("X-BEEP-API-KEY")
-            if provided_key != MASTER_OVERRIDE_KEY:
+            if not self._is_master():
                 self._send_json(403, {"error": "Forbidden: Founder master override key required."})
                 return
 
