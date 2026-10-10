@@ -1,6 +1,6 @@
 "use client";
 
-import { useCockpit } from "../hooks/useCockpit";
+import { SESSION_EXPIRED_NOTICE, useCockpit } from "../hooks/useCockpit";
 import { GateScreen } from "../components/GateScreen";
 import { CockpitHeader } from "../components/CockpitHeader";
 import { MetricHeroCard } from "../components/MetricHeroCard";
@@ -29,6 +29,37 @@ export default function Home() {
         </div>
       )}
 
+      {!cockpit.isAuthenticated && (cockpit.sessionExpired || cockpit.authConfigError) && (
+        <div className="max-w-md w-full mx-auto px-4 pt-4 space-y-2">
+          {cockpit.sessionExpired && (
+            <div
+              role="alert"
+              className="flex items-center justify-between gap-3 p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs font-medium"
+            >
+              <span>{SESSION_EXPIRED_NOTICE}</span>
+              <button
+                type="button"
+                onClick={() => {
+                  cockpit.dismissSessionExpired();
+                  cockpit.openSignIn();
+                }}
+                className="shrink-0 px-3 py-1.5 rounded-lg bg-amber-500 text-black font-bold hover:bg-amber-400"
+              >
+                Sign in
+              </button>
+            </div>
+          )}
+          {cockpit.authConfigError && (
+            <div
+              role="alert"
+              className="p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 text-xs font-medium"
+            >
+              {cockpit.authConfigError}
+            </div>
+          )}
+        </div>
+      )}
+
       {!cockpit.isAuthenticated ? (
         <GateScreen
           onLaunchDemo={cockpit.onLaunchDemo}
@@ -46,6 +77,15 @@ export default function Home() {
           />
 
           <main className="flex-1 max-w-xl w-full mx-auto px-4 py-5 space-y-6 animate-fadeUp">
+            {cockpit.connectionError && (
+              <div
+                role="alert"
+                className="p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 text-xs font-medium"
+              >
+                ⚠️ Live data unavailable — showing last known values. {cockpit.connectionError}
+              </div>
+            )}
+
             <MetricHeroCard telemetry={cockpit.telemetry} onOpenConnector={cockpit.openConnector} />
 
             <ActionButtonsRow
@@ -68,6 +108,7 @@ export default function Home() {
                 signals={cockpit.signals}
                 onExecute={cockpit.onExecuteSignal}
                 isExecuting={cockpit.isExecutingSignal}
+                isDemo={cockpit.telemetry.is_demo}
               />
             </div>
 
@@ -102,6 +143,7 @@ export default function Home() {
         isOpen={cockpit.showAuthModal}
         onClose={cockpit.closeAuth}
         onSuccess={cockpit.onAuthSuccess}
+        initialMode={cockpit.authMode}
       />
 
       <RiskModeSheet

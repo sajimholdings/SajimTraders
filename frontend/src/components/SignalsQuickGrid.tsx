@@ -8,6 +8,8 @@ interface SignalsQuickGridProps {
   signals: ClientSignal[];
   onExecute: (signal: ClientSignal) => Promise<boolean>;
   isExecuting: boolean;
+  /** Demo cockpit: signals are static samples, labelled "DEMO". */
+  isDemo?: boolean;
 }
 
 function healthBadgeClass(status?: string): string {
@@ -21,6 +23,7 @@ export const SignalsQuickGrid: React.FC<SignalsQuickGridProps> = ({
   signals,
   onExecute,
   isExecuting,
+  isDemo = false,
 }) => {
   const [executedIds, setExecutedIds] = useState<Set<string>>(new Set());
   const [loadingId, setLoadingId] = useState<string | null>(null);
@@ -46,12 +49,26 @@ export const SignalsQuickGrid: React.FC<SignalsQuickGridProps> = ({
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2.5">
           <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
-          <h2 className="text-white text-lg font-bold tracking-tight">Live Signals</h2>
+          <h2 className="text-white text-lg font-bold tracking-tight">
+            {isDemo ? "Sample Signals" : "Live Signals"}
+          </h2>
+          {isDemo && (
+            <span className="text-[10px] font-extrabold text-amber-400 bg-amber-500/10 border border-amber-500/30 px-1.5 py-0.5 rounded">
+              DEMO
+            </span>
+          )}
         </div>
         <span className="text-[11px] font-semibold text-green-400 bg-green-500/10 border border-green-500/20 px-2.5 py-1 rounded-full">
           {signals.length} Ready
         </span>
       </div>
+
+      {isDemo && (
+        <p className="text-[11px] text-amber-400/90 bg-amber-500/5 border border-amber-500/20 rounded-xl px-3 py-2">
+          Demo mode: these are static sample signals, not live market data. Sign in and connect
+          an MT5 account to receive live signals.
+        </p>
+      )}
 
       {signals.length === 0 && (
         <div className="bg-[#111111] border border-white/[0.06] rounded-2xl p-6 text-center">
@@ -93,6 +110,11 @@ export const SignalsQuickGrid: React.FC<SignalsQuickGridProps> = ({
                       {signal.action}
                     </span>
                     <span className="text-gray-500 text-[11px]">{signal.timeframe}</span>
+                    {isDemo && (
+                      <span className="text-[9px] font-extrabold text-amber-400 border border-amber-500/30 px-1 rounded">
+                        DEMO
+                      </span>
+                    )}
                   </div>
                   <div className="text-right">
                     <p className="text-green-400 text-xs font-bold">{signal.win_probability}</p>

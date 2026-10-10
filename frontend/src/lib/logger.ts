@@ -1,15 +1,24 @@
 /**
  * Sajim Traders — Client-Side Action & Event Logger
  * Dispatches every user action to the server log endpoint for live auditing.
+ *
+ * Privacy: only origin + pathname are sent (never the query string or hash,
+ * which can carry OAuth tokens), and callers must not pass PII such as emails.
  */
 
-export function trackAction(event: string, details: Record<string, any> = {}) {
+/** Current page URL without query string or fragment. */
+export function sanitizedLocation(): string {
+  if (typeof window === "undefined") return "";
+  return `${window.location.origin}${window.location.pathname}`;
+}
+
+export function trackAction(event: string, details: Record<string, unknown> = {}) {
   try {
     const payload = {
       event,
       details,
       timestamp: new Date().toISOString(),
-      url: typeof window !== "undefined" ? window.location.href : "",
+      url: sanitizedLocation(),
     };
 
     if (process.env.NODE_ENV !== "production") {
