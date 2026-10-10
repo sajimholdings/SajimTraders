@@ -35,6 +35,18 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ACCOUNTS_FILE = os.path.join(BASE_DIR, "config", "client_accounts.json")
 AUTOPILOT_LOG_FILE = os.path.join(BASE_DIR, "autopilot_executions.json")
 
+# Manual / 1-Tap trades get their OWN magic number so neither the V1 (777999) nor the
+# V2 (888222) risk managers ever trail, harvest or close them.
+MAGIC_MANUAL = 555111
+DEFAULT_MANUAL_RISK_FRACTION = 0.01
+
+
+def _to_float(value: Any, default: Optional[float] = None) -> Optional[float]:
+    """Parses a float; returns default for None/''; raises ValueError for garbage."""
+    if value is None or (isinstance(value, str) and value.strip() == ""):
+        return default
+    return float(value)
+
 
 class MultiAccountManager:
     """Manages multiple client trading accounts, risk limits, and trade dispatches."""
@@ -47,23 +59,8 @@ class MultiAccountManager:
         os.makedirs(os.path.dirname(self.accounts_path), exist_ok=True)
         if not os.path.exists(self.accounts_path):
             default_data = {
-                "default_account_id": "17537803",
-                "accounts": {
-                    "17537803": {
-                        "account_id": "17537803",
-                        "account_name": "Jimmy Muema",
-                        "broker_server": "Headway-Real",
-                        "broker_name": "Headway",
-                        "autopilot_enabled": False,
-                        "risk_mode": "ULTRA_SAFE",
-                        "max_lot": 0.01,
-                        "fixed_lot": 0.01,
-                        "max_open_trades": 3,
-                        "connected_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                        "last_synced": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                        "status": "ACTIVE"
-                    }
-                },
+                "default_account_id": "",
+                "accounts": {},
                 "global_settings": {
                     "auto_mirror_v2_signals": True,
                     "default_max_lot_cap": 0.05,
@@ -97,7 +94,9 @@ class MultiAccountManager:
     def get_account(self, account_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """Gets account profile by ID or returns default operator account."""
         data = self._load_data()
-        acc_id = account_id or data.get("default_account_id", "17537803")
+        acc_id = account_id or data.get("default_account_id")
+        if not acc_id:
+            return None
         return data.get("accounts", {}).get(str(acc_id))
 
     def register_or_update_account(self, account_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -111,22 +110,34 @@ class MultiAccountManager:
         existing = accounts.get(acc_id, {})
 
         password = account_data.get("password")
-        broker_server = account_data.get("broker_server", existing.get("broker_server", "Headway-Real"))
+        broker_server = account_data.get("broker_server", existing.get("broker_server"))
         auth_verified = False
 
-        balance = float(account_data.get("balance", existing.get("balance", 0.0)))
-        equity = float(account_data.get("equity", existing.get("equity", balance)))
-        free_margin = float(account_data.get("free_margin", existing.get("free_margin", balance)))
+        try:
+            balance = _to_float(account_data.get("balance"), _to_float(existing.get("balance"), None))
+            equity = _to_float(account_data.get("equity"), _to_float(existing.get("equity"), balance))
+            free_margin = _to_float(account_data.get("free_margin"), _to_float(existing.get("free_margin"), None))
+            max_lot = _to_float(account_data.get("max_lot"), _to_float(existing.get("max_lot"), 0.01))
+            fixed_lot = _to_float(account_data.get("fixed_lot"), _to_float(existing.get("fixed_lot"), 0.01))
+            max_open_trades = int(account_data.get("max_open_trades", existing.get("max_open_trades", 3)))
+        except (TypeError, ValueError) as e:
+            return {"success": False, "error": f"Invalid numeric account field: {e}"}
         account_name = account_data.get("account_name", existing.get("account_name", f"Account #{acc_id}"))
 
-        if MT5_AVAILABLE and password and password != "demo1234":
+        if MT5_AVAILABLE and password:
+            if not broker_server:
+                return {"success": False, "error": "broker_server is required to verify the login"}
+            # The terminal is SHARED with the live bots: remember the current login and
+            # switch back after verification so the bots are never left on a client account.
+            original = None
             try:
                 if not mt5.initialize():
-                    mt5.initialize()
+                    return {"success": False, "error": f"MT5 initialization failed: {mt5.last_error()}"}
+                original = mt5.account_info()
                 login_ok = mt5.login(login=int(acc_id), password=password, server=broker_server)
                 if login_ok:
                     acc_info = mt5.account_info()
-                    if acc_info:
+                    if acc_info and str(acc_info.login) == acc_id:
                         auth_verified = True
                         account_name = acc_info.name or f"Account #{acc_id}"
                         balance = round(acc_info.balance, 2)
@@ -142,22 +153,26 @@ class MultiAccountManager:
                     }
             except Exception as e:
                 logger.error(f"MT5 login exception for {acc_id}: {e}")
+                return {"success": False, "error": f"MT5 login verification failed: {e}"}
+            finally:
+                self._restore_terminal_login(original)
 
         updated = {
             "account_id": acc_id,
             "account_name": account_name,
             "broker_server": broker_server,
-            "broker_name": account_data.get("broker_name", existing.get("broker_name", broker_server.split("-")[0])),
+            "broker_name": account_data.get("broker_name", existing.get("broker_name", (broker_server or "").split("-")[0] or None)),
             "autopilot_enabled": account_data.get("autopilot_enabled", existing.get("autopilot_enabled", False)),
             "risk_mode": account_data.get("risk_mode", existing.get("risk_mode", "ULTRA_SAFE")),
             "balance": balance,
             "equity": equity,
             "free_margin": free_margin,
-            "currency": account_data.get("currency", existing.get("currency", "USD")),
+            "currency": account_data.get("currency", existing.get("currency")),
             "open_positions": account_data.get("open_positions", existing.get("open_positions", [])),
-            "max_lot": float(account_data.get("max_lot", existing.get("max_lot", 0.01))),
-            "fixed_lot": float(account_data.get("fixed_lot", existing.get("fixed_lot", 0.01))),
-            "max_open_trades": int(account_data.get("max_open_trades", existing.get("max_open_trades", 3))),
+            "max_lot": max_lot,
+            "fixed_lot": fixed_lot,
+            "max_open_trades": max_open_trades,
+            "auth_verified": auth_verified or bool(existing.get("auth_verified", False)),
             "connected_at": existing.get("connected_at", datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
             "last_synced": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "status": "ACTIVE"
@@ -170,6 +185,26 @@ class MultiAccountManager:
         logger.info(f"Registered/Updated client account: {acc_id} ({updated['broker_server']}) - Balance: {balance}")
         return {"success": True, "account": updated}
 
+    @staticmethod
+    def _restore_terminal_login(original: Any) -> None:
+        """Logs the shared terminal back into the account it was on before verification."""
+        if not MT5_AVAILABLE or original is None:
+            return
+        try:
+            current = mt5.account_info()
+            if current is not None and current.login == original.login:
+                return
+            ok = mt5.login(original.login, server=original.server)
+            if ok:
+                logger.info(f"Restored shared MT5 terminal to account {original.login} ({original.server}).")
+            else:
+                logger.critical(
+                    f"Could NOT restore MT5 terminal to account {original.login} ({original.server}): "
+                    f"{mt5.last_error()}. Bots on this terminal will refuse to trade until it is re-logged."
+                )
+        except Exception as e:
+            logger.critical(f"Error restoring MT5 terminal login to {getattr(original, 'login', '?')}: {e}")
+
     def update_account_telemetry(self, account_id: str, telemetry: Dict[str, Any]) -> Dict[str, Any]:
         """Updates live balance, equity, positions for an account from external sync/bridge."""
         data = self._load_data()
@@ -178,7 +213,7 @@ class MultiAccountManager:
         account = accounts.setdefault(acc_id, {
             "account_id": acc_id,
             "account_name": telemetry.get("account_name", f"Account #{acc_id}"),
-            "broker_server": telemetry.get("broker_server", "Headway-Demo"),
+            "broker_server": telemetry.get("broker_server"),
             "status": "ACTIVE"
         })
 
@@ -213,16 +248,36 @@ class MultiAccountManager:
     def queue_trade_order(self, order_data: Dict[str, Any]) -> Dict[str, Any]:
         """Queues a 1-tap trade order for execution by local bridge or terminal worker."""
         data = self._load_data()
+        action = str(order_data.get("action", "")).upper()
+        if action not in ("BUY", "SELL"):
+            return {"success": False, "error": f"Invalid action: {order_data.get('action')}"}
+        symbol = str(order_data.get("symbol", "")).strip()
+        if not symbol:
+            return {"success": False, "error": "Symbol is required"}
+        try:
+            volume = _to_float(order_data.get("volume"), None)
+            sl = _to_float(order_data.get("sl"), None)
+            tp = _to_float(order_data.get("tp"), None)
+        except (TypeError, ValueError) as e:
+            return {"success": False, "error": f"Invalid numeric order field: {e}"}
+        if volume is not None and volume <= 0:
+            return {"success": False, "error": "Volume must be positive (or omitted to use the account fixed lot)"}
+        if volume is None:
+            acc_profile = self.get_account(str(order_data.get("account_id", ""))) or {}
+            volume = float(acc_profile.get("fixed_lot", 0.01) or 0.01)
+        if data.get("global_settings", {}).get("enforce_stop_loss", True) and not (sl and sl > 0):
+            return {"success": False, "error": "Stop loss is required (enforce_stop_loss is enabled)"}
+
         orders = data.setdefault("pending_orders", [])
         order_id = f"ORD_{int(time.time()*1000)}"
         order_entry = {
             "order_id": order_id,
             "account_id": str(order_data.get("account_id", "")),
-            "symbol": str(order_data.get("symbol", "")),
-            "action": str(order_data.get("action", "BUY")).upper(),
-            "volume": float(order_data.get("volume", 0.01)),
-            "sl": float(order_data.get("sl", 0.0)),
-            "tp": float(order_data.get("tp", 0.0)),
+            "symbol": symbol,
+            "action": action,
+            "volume": volume,
+            "sl": sl or 0.0,
+            "tp": tp or 0.0,
             "comment": str(order_data.get("comment", "Sajim_1Tap")),
             "status": "PENDING",
             "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -285,13 +340,6 @@ class MultiAccountManager:
         acc_id = str(account_id or data.get("default_account_id", ""))
         account = data.get("accounts", {}).get(acc_id)
 
-        if not account:
-            # If account does not exist yet, auto-register default operator account
-            self._ensure_storage()
-            data = self._load_data()
-            acc_id = "17537803"
-            account = data.get("accounts", {}).get(acc_id)
-
         if account:
             account["autopilot_enabled"] = bool(enabled)
             account["last_synced"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -304,40 +352,45 @@ class MultiAccountManager:
 
     def calculate_lot_size(self, account_id: str, symbol: str, entry_price: float, sl_price: float) -> float:
         """
-        Dynamically calculates safe lot size based on account balance and risk settings:
-        - Small accounts (< $50): strictly locked to 0.01 micro lot
-        - Medium accounts ($50 - $500): 0.01 - 0.05 lots
-        - Large accounts ($500+): calculated proportional to 1-2% risk distance
+        Calculates a safe lot size:
+        - MICRO_FIXED / ULTRA_SAFE: the account's fixed lot (max 0.02)
+        - otherwise: 1% equity risk over the real stop distance using the symbol's tick value
+          (core/lot_calculator.py), capped at the account max_lot. Returns 0.0 if it cannot be
+          sized within the risk budget (callers must then refuse the trade).
         """
         account = self.get_account(account_id) or {}
         risk_mode = account.get("risk_mode", "ULTRA_SAFE")
-        fixed_lot = float(account.get("fixed_lot", 0.01))
+        fixed_lot = float(account.get("fixed_lot", 0.01) or 0.01)
 
         if risk_mode in ("MICRO_FIXED", "ULTRA_SAFE"):
             return max(0.01, min(fixed_lot, 0.02))
 
-        balance = 20.0
-        if MT5_AVAILABLE:
-            try:
-                acc_info = mt5.account_info()
-                if acc_info:
-                    balance = float(acc_info.balance)
-            except Exception:
-                pass
+        if not MT5_AVAILABLE:
+            return 0.0
+        try:
+            acc_info = mt5.account_info()
+        except Exception:
+            acc_info = None
+        if not acc_info or not sl_price or abs(entry_price - sl_price) <= 0:
+            return 0.0
 
-        if balance < 50.0:
-            return 0.01
-        elif balance < 200.0:
-            return 0.02
-        elif balance < 500.0:
-            return 0.05
-        else:
-            risk_usd = balance * 0.01
-            diff = abs(entry_price - sl_price)
-            if diff > 0:
-                raw_lot = round((risk_usd / (diff * 100)), 2)
-                return max(0.01, min(raw_lot, float(account.get("max_lot", 0.10))))
-            return 0.01
+        try:
+            from core.lot_calculator import UniversalLotCalculator
+            lot, _, specs = UniversalLotCalculator.calculate_lot(
+                symbol=symbol,
+                equity=float(acc_info.equity),
+                risk_fraction=DEFAULT_MANUAL_RISK_FRACTION,
+                entry_price=float(entry_price),
+                stop_price=float(sl_price),
+                account_currency=getattr(acc_info, "currency", None),
+            )
+        except Exception as e:
+            logger.error(f"Lot sizing failed for {symbol}: {e}")
+            return 0.0
+        if lot <= 0:
+            logger.info(f"1-Tap sizing rejected for {symbol}: {specs.get('rejected')}")
+            return 0.0
+        return min(lot, float(account.get("max_lot", 0.10) or 0.10))
 
     def execute_one_tap_trade(
         self,
@@ -350,7 +403,10 @@ class MultiAccountManager:
         comment: str = "Sajim_1Tap"
     ) -> Dict[str, Any]:
         """
-        Executes a 1-Tap trade directly onto the connected MT5 account.
+        Executes a 1-Tap trade on the connected MT5 terminal.
+        Refuses unless the terminal is logged into `account_id`. Uses MAGIC_MANUAL so the
+        bots' risk managers never touch it. A stop loss is mandatory when the global
+        `enforce_stop_loss` setting is on (default).
         """
         action = action.upper()
         if action not in ("BUY", "SELL"):
@@ -362,11 +418,37 @@ class MultiAccountManager:
                 "error": "MetaTrader 5 library not available in current environment"
             }
 
+        from v2.safety import kill_switch_active
+        if kill_switch_active():
+            return {"success": False, "error": "Global kill switch is engaged; new trades are blocked"}
+
+        try:
+            sl = _to_float(sl, None)
+            tp = _to_float(tp, None)
+            volume = _to_float(volume, None)
+        except (TypeError, ValueError) as e:
+            return {"success": False, "error": f"Invalid numeric field: {e}"}
+
+        settings = self._load_data().get("global_settings", {})
+        if settings.get("enforce_stop_loss", True) and not (sl and sl > 0):
+            return {"success": False, "error": "Stop loss is required (enforce_stop_loss is enabled)"}
+
         try:
             if not mt5.initialize():
-                mt5.initialize()
+                return {"success": False, "error": f"MT5 initialization failed: {mt5.last_error()}"}
         except Exception as e:
             return {"success": False, "error": f"MT5 initialization failed: {e}"}
+
+        # The order goes to whatever account the terminal is logged into: verify it.
+        acc = mt5.account_info()
+        if acc is None or str(acc.login) != str(account_id).strip():
+            return {
+                "success": False,
+                "error": (
+                    f"Terminal is logged into account {getattr(acc, 'login', None)}, not {account_id}. "
+                    f"Trade refused."
+                ),
+            }
 
         # Check symbol
         sym_info = mt5.symbol_info(symbol)
@@ -387,41 +469,36 @@ class MultiAccountManager:
         tick = mt5.symbol_info_tick(symbol)
         if not tick:
             return {"success": False, "error": f"Failed to retrieve current price tick for {symbol}"}
-
         price = tick.ask if action == "BUY" else tick.bid
-        order_type = mt5.ORDER_TYPE_BUY if action == "BUY" else mt5.ORDER_TYPE_SELL
+
+        if sl and ((action == "BUY" and sl >= price) or (action == "SELL" and sl <= price)):
+            return {"success": False, "error": f"Stop loss {sl} is on the wrong side of price {price}"}
+
+        from v2.execution.mt5_exec import send_market_order, floor_volume
 
         # Calculate lot size
         if volume is None or volume <= 0:
             volume = self.calculate_lot_size(account_id, symbol, price, sl or price)
+        account = self.get_account(account_id) or {}
+        max_lot = float(account.get("max_lot", settings.get("default_max_lot_cap", 0.05)) or 0.05)
+        volume = floor_volume(min(float(volume or 0.0), max_lot), sym_info)
+        if volume <= 0:
+            return {"success": False, "error": "Volume could not be sized within risk / broker minimum lot"}
 
-        volume = max(sym_info.volume_min, min(volume, sym_info.volume_max))
-        volume = round(volume, 2)
-
-        request = {
-            "action": mt5.TRADE_ACTION_DEAL,
-            "symbol": symbol,
-            "volume": volume,
-            "type": order_type,
-            "price": price,
-            "deviation": 20,
-            "magic": 888222,  # Sajim V2 Execution Magic
-            "comment": comment[:31],
-            "type_time": mt5.ORDER_TIME_GTC,
-            "type_filling": mt5.ORDER_FILLING_IOC,
-        }
-
-        if sl is not None and sl > 0:
-            request["sl"] = round(sl, sym_info.digits)
-        if tp is not None and tp > 0:
-            request["tp"] = round(tp, sym_info.digits)
-
-        result = mt5.order_send(request)
-        if result is None:
-            err = mt5.last_error()
-            return {"success": False, "error": f"OrderSend returned None: {err}"}
-
-        if result.retcode != mt5.TRADE_RETCODE_DONE:
+        ok, result, fill_price = send_market_order(
+            symbol=symbol,
+            action=action,
+            volume=volume,
+            sl=round(sl, sym_info.digits) if sl else 0.0,
+            tp=round(tp, sym_info.digits) if tp else 0.0,
+            magic=MAGIC_MANUAL,
+            comment=comment[:31],
+            dry_run=False,
+            bot_name="1-TAP",
+        )
+        if not ok:
+            if result is None:
+                return {"success": False, "error": f"Order not sent: {mt5.last_error()}"}
             return {
                 "success": False,
                 "retcode": result.retcode,
@@ -430,7 +507,7 @@ class MultiAccountManager:
 
         logger.info(
             f"⚡ [1-TAP EXECUTION SUCCESS] Account {account_id} | Ticket: #{result.order} | "
-            f"{action} {volume} {symbol} @ {result.price} | SL: {sl} | TP: {tp}"
+            f"{action} {volume} {symbol} @ {fill_price} | SL: {sl} | TP: {tp}"
         )
 
         return {
@@ -442,6 +519,7 @@ class MultiAccountManager:
             "action": action,
             "sl": sl,
             "tp": tp,
+            "magic": MAGIC_MANUAL,
             "comment": comment,
             "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         }
@@ -457,60 +535,41 @@ class MultiAccountManager:
                 return {"success": False, "error": f"Position #{ticket} not found"}
 
             pos = positions[0]
-            action = "BUY" if pos.type == 1 else "SELL"  # Opposite to close
-            sym_info = mt5.symbol_info(pos.symbol)
-            if not sym_info:
-                return {"success": False, "error": f"Symbol {pos.symbol} not found"}
-
-            tick = mt5.symbol_info_tick(pos.symbol)
-            price = tick.bid if action == "SELL" else tick.ask
-            order_type = mt5.ORDER_TYPE_SELL if action == "SELL" else mt5.ORDER_TYPE_BUY
-
-            req = {
-                "action": mt5.TRADE_ACTION_DEAL,
-                "position": pos.ticket,
-                "symbol": pos.symbol,
-                "volume": pos.volume,
-                "type": order_type,
-                "price": price,
-                "deviation": 20,
-                "magic": pos.magic,
-                "comment": "Sajim_WebClose",
-                "type_time": mt5.ORDER_TIME_GTC,
-                "type_filling": mt5.ORDER_FILLING_IOC,
-            }
-
-            res = mt5.order_send(req)
-            if res and res.retcode == mt5.TRADE_RETCODE_DONE:
-                return {"success": True, "ticket": ticket, "closed_at": res.price}
-            return {"success": False, "error": f"Close failed: {res.comment if res else 'Unknown'}"}
+            from v2.execution.mt5_exec import close_position
+            if close_position(pos, magic=pos.magic, comment="Sajim_WebClose", dry_run=False, bot_name="WEB"):
+                return {"success": True, "ticket": ticket}
+            return {"success": False, "error": f"Close failed: {mt5.last_error()}"}
         except Exception as e:
             return {"success": False, "error": str(e)}
 
     def get_live_account_telemetry(self, account_id: Optional[str] = None) -> Dict[str, Any]:
         """Fetches live balance, equity, margin, and positions for an account."""
         account = self.get_account(account_id) or {}
-        acc_id = account.get("account_id", str(account_id) if account_id else "17537803")
-        is_jimmy = str(acc_id) == "17537803"
+        acc_id = account.get("account_id", str(account_id) if account_id else None)
 
-        default_bal = 20.98 if is_jimmy else 0.0
-        stored_bal = float(account.get("balance", default_bal))
-        stored_equity = float(account.get("equity", stored_bal))
-        stored_margin = float(account.get("free_margin", stored_bal))
+        def _stored(key: str) -> Optional[float]:
+            try:
+                return _to_float(account.get(key), None)
+            except (TypeError, ValueError):
+                return None
+
+        stored_bal = _stored("balance")
+        stored_equity = _stored("equity")
+        stored_margin = _stored("free_margin")
 
         base_info = {
             "account_id": acc_id,
-            "account_name": account.get("account_name", "Jimmy Muema" if is_jimmy else f"Account #{acc_id}"),
-            "broker_server": account.get("broker_server", "Headway-Real" if is_jimmy else "Headway-Demo"),
+            "account_name": account.get("account_name", f"Account #{acc_id}" if acc_id else None),
+            "broker_server": account.get("broker_server"),
             "autopilot_enabled": account.get("autopilot_enabled", False),
             "risk_mode": account.get("risk_mode", "ULTRA_SAFE"),
-            "balance": round(stored_bal, 2),
-            "equity": round(stored_equity, 2),
-            "free_margin": round(stored_margin, 2),
-            "margin_level": float(account.get("margin_level", 0.0)),
-            "currency": account.get("currency", "USD"),
+            "balance": round(stored_bal, 2) if stored_bal is not None else None,
+            "equity": round(stored_equity, 2) if stored_equity is not None else None,
+            "free_margin": round(stored_margin, 2) if stored_margin is not None else None,
+            "margin_level": _stored("margin_level"),
+            "currency": account.get("currency"),
             "open_positions": account.get("open_positions", []),
-            "floating_pnl": float(account.get("floating_pnl", 0.0)),
+            "floating_pnl": _stored("floating_pnl"),
             "terminal_connected": bool(account.get("terminal_connected", False))
         }
 
@@ -522,12 +581,12 @@ class MultiAccountManager:
                         base_info.update({
                             "account_id": str(acc.login),
                             "account_name": acc.name or account.get("account_name", f"Account #{acc.login}"),
-                            "broker_server": acc.server or account.get("broker_server", "Headway-Demo"),
+                            "broker_server": acc.server or account.get("broker_server"),
                             "balance": round(acc.balance, 2),
                             "equity": round(acc.equity, 2),
                             "free_margin": round(acc.margin_free, 2),
                             "margin_level": round(acc.margin_level, 1) if acc.margin_level else 0.0,
-                            "currency": acc.currency or "USD",
+                            "currency": acc.currency or None,
                             "terminal_connected": True
                         })
 
@@ -559,26 +618,24 @@ class MultiAccountManager:
         server_str = str(base_info.get("broker_server", "")).lower()
         is_demo = "demo" in server_str or "demo" in str(base_info.get("account_name", "")).lower()
 
-        today_pnl = float(account.get("today_pnl", 0.0))
-        today_pnl_pct = float(account.get("today_pnl_percent", 0.0))
+        today_pnl = _stored("today_pnl")
+        today_pnl_pct = _stored("today_pnl_percent")
 
         if MT5_AVAILABLE and base_info.get("terminal_connected"):
             try:
-                today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-                deals = mt5.history_deals_get(today_start, datetime.now())
-                if deals:
-                    closed_pnl = sum(float(d.profit) + float(d.swap) + float(d.commission) for d in deals if getattr(d, 'entry', 0) == 1)
-                    if abs(closed_pnl) > 0.01:
-                        today_pnl = round(closed_pnl, 2)
-                        bal = float(base_info.get("balance", 0.0))
-                        if bal > 0:
-                            today_pnl_pct = round((today_pnl / bal) * 100, 1)
+                from v2.safety import utc_day_start, utc_now
+                deals = mt5.history_deals_get(utc_day_start(), utc_now())
+                if deals is not None:
+                    closed_pnl = sum(
+                        float(d.profit) + float(d.swap) + float(d.commission) + float(getattr(d, "fee", 0.0) or 0.0)
+                        for d in deals if getattr(d, 'type', 0) in (0, 1)
+                    )
+                    today_pnl = round(closed_pnl, 2)
+                    bal = float(base_info.get("balance") or 0.0)
+                    start_bal = bal - closed_pnl
+                    today_pnl_pct = round((today_pnl / start_bal) * 100, 1) if start_bal > 0 else None
             except Exception:
                 pass
-
-        if today_pnl == 0.0 and is_jimmy:
-            today_pnl = 4.35
-            today_pnl_pct = 20.7
 
         base_info["today_pnl"] = today_pnl
         base_info["today_pnl_percent"] = today_pnl_pct

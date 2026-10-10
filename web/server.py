@@ -7,11 +7,17 @@ Decomposed Route Handlers:
   - web/routes/client.py : Client portal, accounts, 1-tap trade routing
   - web/routes/admin.py  : Institutional telemetry, signals, gatekeeper
   - web/routes/base.py   : Utility loaders and session helpers
+
+LEGACY / LOCAL ONLY: production (render.yaml) serves web/app.py (FastAPI). This stdlib
+gateway binds to 127.0.0.1 by default (override with WEB_SERVER_HOST), sends no
+wildcard CORS headers, and requires an X-ADMIN-KEY header matching ADMIN_KEY on every
+mutating / account-data route (denied when ADMIN_KEY is unset).
 ========================================================================================
 """
 
 import os
 import sys
+import hmac
 import json
 import logging
 from urllib.parse import urlparse
@@ -27,6 +33,8 @@ from web.routes.client import ClientRoutesMixin
 from web.routes.admin import AdminRoutesMixin
 
 logger = logging.getLogger("SajimWebServer")
+
+MAX_BODY_BYTES = 64 * 1024
 
 
 class SajimTradersHandler(SimpleHTTPRequestHandler, ClientRoutesMixin, AdminRoutesMixin):
@@ -72,19 +80,26 @@ class SajimTradersHandler(SimpleHTTPRequestHandler, ClientRoutesMixin, AdminRout
         response_bytes = json.dumps(data, indent=2).encode("utf-8")
         self.send_response(status_code)
         self.send_header("Content-Type", "application/json")
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type, X-BEEP-API-KEY")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
         self.end_headers()
         self.wfile.write(response_bytes)
 
     def do_OPTIONS(self):
-        self.send_response(200)
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type, X-BEEP-API-KEY")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        # Same-origin only: no CORS headers are emitted, so cross-origin preflights fail.
+        self.send_response(204)
         self.end_headers()
+
+    def _require_admin_key(self) -> bool:
+        """Returns True if X-ADMIN-KEY matches ADMIN_KEY; otherwise sends 401/503 and returns False."""
+        expected = os.environ.get("ADMIN_KEY", "")
+        if not expected:
+            self._send_json({"success": False, "error": "Admin key not configured"}, 503)
+            return False
+        provided = self.headers.get("X-ADMIN-KEY") or ""
+        if not provided or not hmac.compare_digest(provided.encode("utf-8"), expected.encode("utf-8")):
+            self._send_json({"success": False, "error": "Invalid admin key"}, 401)
+            return False
+        return True
 
     def do_GET(self):
         parsed = urlparse(self.path)
@@ -131,12 +146,20 @@ class SajimTradersHandler(SimpleHTTPRequestHandler, ClientRoutesMixin, AdminRout
         parsed = urlparse(self.path)
         path = parsed.path.rstrip("/")
 
-        content_length = int(self.headers.get("Content-Length", 0))
+        try:
+            content_length = int(self.headers.get("Content-Length", 0))
+        except ValueError:
+            content_length = 0
+        if content_length > MAX_BODY_BYTES:
+            self._send_json({"error": "Payload too large"}, 413)
+            return
         post_data = self.rfile.read(content_length) if content_length > 0 else b"{}"
 
         try:
             body = json.loads(post_data.decode("utf-8")) if post_data else {}
         except Exception:
+            body = {}
+        if not isinstance(body, dict):
             body = {}
 
         # Client Execution & Account Actions
@@ -168,15 +191,16 @@ class SajimTradersHandler(SimpleHTTPRequestHandler, ClientRoutesMixin, AdminRout
             self._send_json({"error": "Unknown POST route", "path": path}, 404)
 
 
-def run_web_server(port: int = 8080, host: str = "0.0.0.0"):
-    """Starts the multi-threaded web server."""
+def run_web_server(port: int = 8080, host: str = None):
+    """Starts the multi-threaded web server (loopback-only unless WEB_SERVER_HOST is set)."""
+    host = host or os.environ.get("WEB_SERVER_HOST", "127.0.0.1")
     os.makedirs(STATIC_DIR, exist_ok=True)
     server_address = (host, port)
     httpd = ThreadingHTTPServer(server_address, SajimTradersHandler)
 
     print("=" * 75)
     print(f"[*] SAJIM TRADERS — MODULAR WEB GATEWAY")
-    print(f"[*] Server running on: http://localhost:{port}")
+    print(f"[*] Server running on: http://{host}:{port}")
     print(f"[*] Static Assets   : {STATIC_DIR}")
     print("=" * 75)
 

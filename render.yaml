@@ -16,16 +16,12 @@ services:
         sync: false
       - key: ADMIN_KEY
         sync: false
-      - key: CTRADER_CLIENT_ID
+      # Dedicated secret for encrypting stored MT5 passwords (required by /api/client/connect).
+      # Must be identical on the bridge supervisor host. Generate with:
+      #   python -c "import secrets; print(secrets.token_urlsafe(48))"
+      - key: CREDENTIAL_ENCRYPTION_KEY
         sync: false
-      - key: CTRADER_CLIENT_SECRET
-        sync: false
-      - key: CTRADER_ACCESS_TOKEN
-        sync: false
-      - key: CTRADER_ACCOUNT_ID
-        sync: false
-      - key: CTRADER_ENVIRONMENT
-        value: demo
-      - key: BROKER_BACKEND
-        value: ctrader
-
+      # NOTE: the cTrader bridge (core/ctrader_bridge.py) is a non-functional stub and no
+      # code reads BROKER_BACKEND; execution runs through the MT5 bridge workers only.
+      # Re-add CTRADER_CLIENT_ID / CTRADER_CLIENT_SECRET / CTRADER_ACCESS_TOKEN /
+      # CTRADER_ACCOUNT_ID / CTRADER_ENVIRONMENT here once that integration is real.

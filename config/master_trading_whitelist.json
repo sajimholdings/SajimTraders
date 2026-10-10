@@ -3,6 +3,7 @@
     "title": "SAJIM QUANT LABS - SINGLE SOURCE OF TRUTH MASTER TRADING WHITELIST",
     "architect": "Jimmy Mathu",
     "description": "Any change in this JSON file is automatically and immediately hot-reloaded across Sajim V1, V2, Confluence Ensemble, and all Strategy Cartridges.",
+    "single_source_note": "This file is the ONLY whitelist/blacklist source. config/v1_edge_filter.json was removed and config/v1_edge_filter.py is a thin shim over core/whitelist_manager.py. 'SYMBOL_TF' entries in toxic_blacklist (e.g. GBPJPY_M15) block that timeframe only. XAGUSD added to toxic_blacklist to preserve the former V1 hard-coded blacklist.",
     "last_empirical_audit": "2026-09-09 Headway Real MT5 Grand Confluence Audit (docs/GRAND_CONFLUENCE_AUDIT_REPORT.md)"
   },
   "live_trading_whitelist": [
@@ -24,6 +25,7 @@
   ],
   "toxic_blacklist": [
     "XAUGBP",
+    "XAGUSD",
     "CADCHF",
     "AUDCHF",
     "NZDCHF",

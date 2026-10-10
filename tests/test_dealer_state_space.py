@@ -27,6 +27,9 @@ from core.dealer_state_space import (
 
 class TestDealerStateSpace(unittest.TestCase):
 
+    def setUp(self):
+        np.random.seed(42)  # particle filter is stochastic; keep tests deterministic
+
     def test_particle_filter_initialization(self):
         estimator = ParticleFilterDealerEstimator(num_particles=200)
         self.assertEqual(estimator.N, 200)

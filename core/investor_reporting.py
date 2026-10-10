@@ -7,9 +7,11 @@ Chief Quantitative Architect: Jimmy Mathu
 Purpose:
   - Aggregates live cTrader deal ledger & open positions.
   - Computes investor-grade audit metrics via QuantEvaluator.
-  - Writes structured audit files:
+  - Optionally writes structured audit files (opt-in: export_files=True or
+    INVESTOR_REPORT_EXPORT=1 — never on every API request by default):
       * vault/investor_reports/investor_audit_summary.json
       * vault/investor_reports/trade_ledger.csv
+  - When there are no real deals, returns an explicit "no data" state (no demo deals).
   - Renders institutional executive cards for partners, bankers, and investors.
 ========================================================================================
 """
@@ -29,7 +31,6 @@ for p in (ROOT_DIR, BASE_DIR):
         sys.path.insert(0, p)
 
 VAULT_REPORTS = os.path.join(ROOT_DIR, "vault", "investor_reports")
-os.makedirs(VAULT_REPORTS, exist_ok=True)
 
 from core.ctrader_bridge import CTraderBridge
 from core.quant_evaluator import QuantEvaluator
@@ -48,29 +49,29 @@ class InvestorReporting:
         cls,
         bridge: Optional[CTraderBridge] = None,
         initial_capital: float = 10000.0,
+        export_files: Optional[bool] = None,
     ) -> Dict[str, Any]:
         """
         Generates comprehensive investor performance report from cTrader ledger.
+
+        Only real deals are evaluated. With no deals the package carries
+        has_data=False and zeroed metrics. Files are written only when export_files
+        is True (or INVESTOR_REPORT_EXPORT=1 when export_files is None).
         """
+        if export_files is None:
+            export_files = os.environ.get("INVESTOR_REPORT_EXPORT", "0") == "1"
         if bridge is None:
             bridge = CTraderBridge.get_instance()
 
         deals = bridge.get_deals(limit=500)
         telemetry = bridge.get_account_telemetry()
 
-        # If no deals have occurred yet in this session, provide baseline or sample
-        if not deals:
-            # Seed demo historical audit deals so investors can immediately inspect methodology
-            deals = [
-                {"ticket": 1001, "symbol": "XAUUSD", "action": "BUY", "volume": 0.05, "entry_price": 2680.50, "exit_price": 2686.50, "profit": 30.00, "r_multiple": 2.10, "label": "SAJIM_V2_SURGE", "close_reason": "Hummingbird_Harvest", "close_time": "2026-09-15T14:30:00"},
-                {"ticket": 1002, "symbol": "EURJPY", "action": "SELL", "volume": 0.10, "entry_price": 162.80, "exit_price": 162.20, "profit": 39.50, "r_multiple": 2.40, "label": "SAJIM_V2_REVERT", "close_reason": "Target_Hit", "close_time": "2026-09-15T18:45:00"},
-                {"ticket": 1003, "symbol": "GBPJPY", "action": "BUY", "volume": 0.05, "entry_price": 194.10, "exit_price": 193.80, "profit": -11.20, "r_multiple": -1.00, "label": "SAJIM_V2_SURGE", "close_reason": "Stop_Loss", "close_time": "2026-09-16T04:15:00"},
-                {"ticket": 1004, "symbol": "XAUUSD", "action": "BUY", "volume": 0.08, "entry_price": 2682.10, "exit_price": 2689.40, "profit": 58.40, "r_multiple": 3.10, "label": "SAJIM_V1", "close_reason": "Tranche_3_Runner", "close_time": "2026-09-16T08:20:00"},
-                {"ticket": 1005, "symbol": "USDCAD", "action": "SELL", "volume": 0.10, "entry_price": 1.3930, "exit_price": 1.3905, "profit": 18.00, "r_multiple": 1.50, "label": "SAJIM_V2_REVERT", "close_reason": "Ratchet_Lock", "close_time": "2026-09-16T11:00:00"},
-            ]
+        deals = deals or []
+        telemetry = telemetry or {}
 
         # Evaluate raw math
         eval_metrics = QuantEvaluator.evaluate_multi_bot_breakdown(deals, initial_capital=initial_capital)
+        eval_metrics.setdefault("portfolio", {}).setdefault("investor_projections", {})
 
         package = {
             "report_timestamp": datetime.now(timezone.utc).isoformat(),
@@ -80,7 +81,18 @@ class InvestorReporting:
             "account_telemetry": telemetry,
             "evaluation": eval_metrics,
             "raw_deals_count": len(deals),
+            "has_data": bool(deals),
         }
+        if not deals:
+            package["message"] = "No closed trades recorded yet."
+
+        if export_files:
+            cls._export_files(package, deals)
+        return package
+
+    @classmethod
+    def _export_files(cls, package: Dict[str, Any], deals: List[Dict[str, Any]]) -> None:
+        os.makedirs(VAULT_REPORTS, exist_ok=True)
 
         # 1. Export JSON Summary
         summary_path = os.path.join(VAULT_REPORTS, "investor_audit_summary.json")
@@ -97,11 +109,12 @@ class InvestorReporting:
                 writer.writerow(d)
 
         logger.info(f"[Investor Deck] Audit reports successfully exported to {VAULT_REPORTS}")
-        return package
 
     @classmethod
     def render_executive_card(cls, package: Dict[str, Any]) -> str:
         """Renders an institutional investor-ready performance card."""
+        if not package.get("has_data"):
+            return "SAJIM HOLDINGS QUANTITATIVE LABS -- INVESTOR AUDIT REPORT\nNo closed trades recorded yet.\n"
         port = package["evaluation"]["portfolio"]
         bots = package["evaluation"]["bots"]
         telemetry = package["account_telemetry"]
@@ -148,5 +161,5 @@ Trade Ledger Exported : vault/investor_reports/trade_ledger.csv
 
 
 if __name__ == "__main__":
-    pkg = InvestorReporting.generate_investor_package()
+    pkg = InvestorReporting.generate_investor_package(export_files=True)
     print(InvestorReporting.render_executive_card(pkg))

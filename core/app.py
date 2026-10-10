@@ -18,7 +18,8 @@ from typing import Dict, Any, List, Optional
 
 # Configuration
 API_URL = os.environ.get("BEEP_API_URL", "http://localhost:8080")
-API_KEY = os.environ.get("BEEP_API_KEY", "sajim-tete-live-key-9921")
+# No hardcoded fallback: the key must be provided via the environment.
+API_KEY = os.environ.get("BEEP_API_KEY", "")
 
 
 class SajimBeepClient:
@@ -27,6 +28,8 @@ class SajimBeepClient:
     def __init__(self, base_url: str = API_URL, api_key: str = API_KEY):
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
+        if not self.api_key:
+            raise RuntimeError("BEEP_API_KEY is not set. Export it in the environment before using SajimBeepClient.")
 
     def _request(self, endpoint: str, data: Optional[Dict[str, Any]] = None, method: Optional[str] = None) -> Dict[str, Any]:
         url = f"{self.base_url}{endpoint}"

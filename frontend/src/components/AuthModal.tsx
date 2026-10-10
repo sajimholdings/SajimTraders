@@ -1,8 +1,14 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { X, Lock, Mail, User, ArrowRight, ShieldCheck } from "lucide-react";
-import { supabaseAuth } from "../lib/supabase";
+import {
+  isSupabaseConfigured,
+  SUPABASE_CONFIG_ERROR,
+  supabaseAuth,
+  type AuthResult,
+} from "../lib/supabase";
+import { sessionFromPayload } from "../lib/session";
 import { trackAction } from "../lib/logger";
 import { storage } from "../lib/storage";
 import type { AuthMode, AuthUser } from "../lib/types";
@@ -12,6 +18,23 @@ interface AuthModalProps {
   onClose: () => void;
   onSuccess: (user: AuthUser) => void;
   initialMode?: AuthMode;
+}
+
+const CHECK_EMAIL_MESSAGE =
+  "Account created. Check your email to confirm your address, then sign in.";
+
+/**
+ * Persist the session from a successful auth response and build the AuthUser.
+ * Returns null unless the response carries both an access token and a user id.
+ */
+function completeAuth(result: AuthResult, email: string, fullName?: string): AuthUser | null {
+  const session = sessionFromPayload(result.session);
+  const user = result.user ?? result.session?.user ?? null;
+  if (!session || !user?.id) return null;
+  storage.setSession(session);
+  const resolvedName =
+    fullName?.trim() || user.user_metadata?.full_name || email.split("@")[0] || "Trader";
+  return { email: user.email || email, fullName: resolvedName, id: user.id };
 }
 
 export const AuthModal: React.FC<AuthModalProps> = ({
@@ -26,12 +49,34 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [infoMsg, setInfoMsg] = useState<string | null>(null);
+
+  // Start in the requested mode each time the modal is opened.
+  useEffect(() => {
+    if (isOpen) {
+      setMode(initialMode);
+      setErrorMsg(null);
+      setInfoMsg(null);
+    }
+  }, [isOpen, initialMode]);
 
   if (!isOpen) return null;
+
+  const finish = (user: AuthUser, event: string) => {
+    trackAction(event, { id: user.id });
+    onSuccess(user);
+    onClose();
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
+    setInfoMsg(null);
+
+    if (!isSupabaseConfigured) {
+      setErrorMsg(SUPABASE_CONFIG_ERROR);
+      return;
+    }
 
     if (password.length < 6) {
       setErrorMsg("Password must be at least 6 characters long.");
@@ -39,47 +84,68 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     }
 
     setLoading(true);
+    try {
+      if (mode === "signup") {
+        trackAction("AUTH_SIGNUP_ATTEMPT");
+        const signup = await supabaseAuth.signUp(email, password, fullName);
+        if (signup.error) {
+          setErrorMsg(signup.error);
+          trackAction("AUTH_SIGNUP_ERROR", { error: signup.error });
+          return;
+        }
 
-    if (mode === "signup") {
-      trackAction("AUTH_SIGNUP_ATTEMPT", { email });
-      const signup = await supabaseAuth.signUp(email, password, fullName);
-      if (signup.error) {
-        setErrorMsg(signup.error);
-        setLoading(false);
-        trackAction("AUTH_SIGNUP_ERROR", { error: signup.error });
-        return;
+        // Auto-confirmed projects return a session directly.
+        const direct = completeAuth(signup, email, fullName);
+        if (direct) {
+          finish(direct, "AUTH_SIGNUP_SUCCESS");
+          return;
+        }
+
+        // Otherwise try to sign in; this fails while email confirmation is pending.
+        const login = await supabaseAuth.signInWithPassword(email, password);
+        if (login.error) {
+          const needsConfirmation =
+            /confirm/i.test(login.error) || Boolean(signup.user && !signup.session);
+          if (needsConfirmation) {
+            setInfoMsg(CHECK_EMAIL_MESSAGE);
+            setMode("signin");
+            trackAction("AUTH_SIGNUP_CONFIRMATION_REQUIRED");
+          } else {
+            setErrorMsg(login.error);
+            trackAction("AUTH_SIGNUP_SIGNIN_ERROR", { error: login.error });
+          }
+          return;
+        }
+
+        const user = completeAuth(login, email, fullName);
+        if (!user) {
+          setErrorMsg("Sign-in did not return a valid session. Please try signing in again.");
+          return;
+        }
+        finish(user, "AUTH_SIGNUP_SUCCESS");
+      } else {
+        trackAction("AUTH_SIGNIN_ATTEMPT");
+        const login = await supabaseAuth.signInWithPassword(email, password);
+
+        if (login.error) {
+          setErrorMsg(
+            /confirm/i.test(login.error)
+              ? "Please confirm your email address first (check your inbox), then sign in."
+              : login.error
+          );
+          trackAction("AUTH_SIGNIN_ERROR", { error: login.error });
+          return;
+        }
+
+        const user = completeAuth(login, email);
+        if (!user) {
+          setErrorMsg("Sign-in did not return a valid session. Please try again.");
+          return;
+        }
+        finish(user, "AUTH_SIGNIN_SUCCESS");
       }
-      // Immediately sign in to confirm the new account.
-      const login = await supabaseAuth.signInWithPassword(email, password);
-      const token = (login.session as { access_token?: string } | null)?.access_token;
-      if (token) storage.setToken(token);
+    } finally {
       setLoading(false);
-
-      const resolvedName = fullName.trim() || email.split("@")[0];
-      const userId =
-        signup.user?.id || login.user?.id || `USER-${Math.floor(Math.random() * 10000)}`;
-      trackAction("AUTH_SIGNUP_SUCCESS", { email, id: userId });
-      onSuccess({ email, fullName: resolvedName, id: userId });
-      onClose();
-    } else {
-      trackAction("AUTH_SIGNIN_ATTEMPT", { email });
-      const login = await supabaseAuth.signInWithPassword(email, password);
-      setLoading(false);
-
-      if (login.error) {
-        setErrorMsg(login.error);
-        trackAction("AUTH_SIGNIN_ERROR", { error: login.error });
-        return;
-      }
-
-      const user = login.user;
-      const token = (login.session as { access_token?: string } | null)?.access_token;
-      if (token) storage.setToken(token);
-      const resolvedName = user?.user_metadata?.full_name || email.split("@")[0] || "Trader";
-      const userId = user?.id || `USER-${Math.floor(Math.random() * 10000)}`;
-      trackAction("AUTH_SIGNIN_SUCCESS", { email, id: userId });
-      onSuccess({ email, fullName: resolvedName, id: userId });
-      onClose();
     }
   };
 
@@ -118,6 +184,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             onClick={() => {
               setMode("signup");
               setErrorMsg(null);
+              setInfoMsg(null);
             }}
             className={`py-2 text-xs font-bold rounded-xl transition-all ${
               mode === "signup"
@@ -132,6 +199,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             onClick={() => {
               setMode("signin");
               setErrorMsg(null);
+              setInfoMsg(null);
             }}
             className={`py-2 text-xs font-bold rounded-xl transition-all ${
               mode === "signin"
@@ -143,9 +211,21 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           </button>
         </div>
 
+        {!isSupabaseConfigured && !errorMsg && (
+          <div className="mb-4 p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-400 text-xs font-medium">
+            {SUPABASE_CONFIG_ERROR}
+          </div>
+        )}
+
         {errorMsg && (
           <div className="mb-4 p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 text-xs font-medium">
             {errorMsg}
+          </div>
+        )}
+
+        {infoMsg && (
+          <div className="mb-4 p-3 rounded-xl bg-green-500/10 border border-green-500/30 text-green-400 text-xs font-medium">
+            {infoMsg}
           </div>
         )}
 
@@ -203,7 +283,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
           <button
             type="submit"
-            disabled={loading}
+            disabled={loading || !isSupabaseConfigured}
             className="w-full py-3.5 bg-gradient-to-r from-green-500 to-green-600 hover:from-green-400 hover:to-green-500 text-black font-extrabold text-xs rounded-2xl shadow-[0_4px_20px_rgba(34,197,94,0.3)] transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-[0.98] disabled:opacity-50"
           >
             {loading ? (

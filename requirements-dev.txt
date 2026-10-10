@@ -1,0 +1,3 @@
+# Test/CI dependencies (on top of requirements.txt)
+pytest>=8.0
+httpx>=0.27

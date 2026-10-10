@@ -16,7 +16,10 @@ import numpy as np
 from typing import Dict, Any, List, Optional
 from v2.strategy_base import BaseStrategyCartridge, StrategySignal
 from v2.trend_duration_engine import TrendDurationEngine
-from core.beep_processor import BeepSnipeFilter, BeepSnipeEvaluation
+try:
+    from core.beep_processor import BeepSnipeFilter, BeepSnipeEvaluation  # private BEEP module (optional)
+except ImportError:  # pragma: no cover - depends on private modules
+    BeepSnipeFilter, BeepSnipeEvaluation = None, None
 
 
 class YoungSurgeContinuation(BaseStrategyCartridge):
@@ -49,7 +52,9 @@ class YoungSurgeContinuation(BaseStrategyCartridge):
     ):
         super().__init__(name=name, enabled=enabled)
         self.engine = TrendDurationEngine(length=50, trend_length=3, max_samples=10)
-        self.snipe_filter = BeepSnipeFilter(min_snipe_score=min_beep_score)
+        if use_beep_filter and BeepSnipeFilter is None:
+            raise ImportError("use_beep_filter=True requires the private BEEP module core.beep_processor (not in this repo)")
+        self.snipe_filter = BeepSnipeFilter(min_snipe_score=min_beep_score) if BeepSnipeFilter is not None else None
         self.parameters = {
             "max_maturity_ratio": max_maturity_ratio,
             "sl_atr_mult": sl_atr_mult,

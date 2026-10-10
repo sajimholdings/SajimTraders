@@ -3,21 +3,31 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   AccountTelemetry,
+  AuthMode,
   AuthUser,
   ClientSignal,
   ClientTrade,
   GateStats,
   RiskMode,
 } from "../lib/types";
-import { DEMO_TELEMETRY, EMPTY_TELEMETRY } from "../lib/constants";
+import { DEMO_SIGNALS, DEMO_TELEMETRY, EMPTY_TELEMETRY } from "../lib/constants";
 import { api } from "../lib/api";
-import { supabaseAuth } from "../lib/supabase";
+import { isSupabaseConfigured, SUPABASE_CONFIG_ERROR, supabaseAuth } from "../lib/supabase";
+import {
+  expireSession,
+  onSessionExpired,
+  restoreSession,
+  sessionFromHash,
+  signOutSession,
+} from "../lib/session";
 import { storage } from "../lib/storage";
 import { trackAction } from "../lib/logger";
 import { usePolling } from "./usePolling";
 
 const POLL_INTERVAL_MS = 3500;
 const TOAST_DURATION_MS = 4000;
+
+export const SESSION_EXPIRED_NOTICE = "Your session expired, please sign in again.";
 
 function buildPosition(
   signal: ClientSignal,
@@ -41,17 +51,27 @@ function buildPosition(
   };
 }
 
+function isLinkedAccount(t: AccountTelemetry): boolean {
+  return !t.is_demo && t.account_id !== "NEW" && t.broker_server !== "None";
+}
+
 export function useCockpit() {
   const [isMounted, setIsMounted] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  // Polling for real users waits until a restored session has been validated.
+  const [sessionReady, setSessionReady] = useState(false);
+  const [sessionExpired, setSessionExpired] = useState(false);
   const [showConnectorModal, setShowConnectorModal] = useState(false);
   const [connectorTab, setConnectorTab] = useState<"demo" | "real">("demo");
   const [showAuthModal, setShowAuthModal] = useState(false);
+  const [authMode, setAuthMode] = useState<AuthMode>("signup");
   const [showRiskSheet, setShowRiskSheet] = useState(false);
 
-  const [telemetry, setTelemetry] = useState<AccountTelemetry>(EMPTY_TELEMETRY);
+  const [telemetry, setTelemetryState] = useState<AccountTelemetry>(EMPTY_TELEMETRY);
   const [signals, setSignals] = useState<ClientSignal[]>([]);
   const [gateStats, setGateStats] = useState<GateStats | null>(null);
+  const [telemetryError, setTelemetryError] = useState<string | null>(null);
+  const [signalsError, setSignalsError] = useState<string | null>(null);
 
   const [isTogglingAutoPilot, setIsTogglingAutoPilot] = useState(false);
   const [isClosingTrade, setIsClosingTrade] = useState(false);
@@ -62,17 +82,69 @@ export function useCockpit() {
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const signalsSectionRef = useRef<HTMLDivElement>(null);
 
+  // Latest telemetry for async callbacks (avoids stale closures).
+  const telemetryRef = useRef<AccountTelemetry>(EMPTY_TELEMETRY);
+  // Bumped on sign-in, sign-out, session expiry and account switch. Responses
+  // started under an older generation are discarded, and polling restarts.
+  const sessionGenRef = useRef(0);
+  const [sessionGen, setSessionGen] = useState(0);
+  const executingRef = useRef(false);
+
+  const setTelemetry = useCallback(
+    (next: AccountTelemetry | ((prev: AccountTelemetry) => AccountTelemetry)) => {
+      if (typeof next === "function") {
+        setTelemetryState((prev) => {
+          const value = next(prev);
+          telemetryRef.current = value;
+          return value;
+        });
+      } else {
+        telemetryRef.current = next;
+        setTelemetryState(next);
+      }
+    },
+    []
+  );
+
+  const bumpSessionGen = useCallback(() => {
+    sessionGenRef.current += 1;
+    setSessionGen(sessionGenRef.current);
+  }, []);
+
   const showToast = useCallback((message: string) => {
     setToast(message);
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
     toastTimerRef.current = setTimeout(() => setToast(null), TOAST_DURATION_MS);
   }, []);
 
+  const resetToGate = useCallback(() => {
+    bumpSessionGen();
+    setIsAuthenticated(false);
+    setSessionReady(false);
+    setTelemetry(EMPTY_TELEMETRY);
+    setSignals([]);
+    setTelemetryError(null);
+    setSignalsError(null);
+  }, [bumpSessionGen, setTelemetry]);
+
+  // A session that cannot be refreshed: drop to the gate with a clear notice.
+  const handleSessionExpired = useCallback(() => {
+    if (telemetryRef.current.is_demo) return;
+    storage.clear();
+    resetToGate();
+    setSessionExpired(true);
+    showToast(`🔒 ${SESSION_EXPIRED_NOTICE}`);
+    trackAction("SESSION_EXPIRED");
+  }, [resetToGate, showToast]);
+
+  useEffect(() => onSessionExpired(handleSessionExpired), [handleSessionExpired]);
+
   // After auth, auto-load the user's first registered MT5 account (if any) so the
   // live balance/equity shows without requiring a manual "Connect" step.
   const loadUserAccounts = useCallback(async () => {
+    const gen = sessionGenRef.current;
     const listRes = await api.getAccounts();
-    if (!listRes.ok) return;
+    if (gen !== sessionGenRef.current || !listRes.ok) return;
     const accounts = Array.isArray(listRes.data.accounts) ? listRes.data.accounts : [];
     if (accounts.length === 0) return;
     const first = accounts[0];
@@ -80,7 +152,7 @@ export function useCockpit() {
     if (!accountId) return;
 
     const accRes = await api.getAccount(accountId);
-    if (!accRes.ok) return;
+    if (gen !== sessionGenRef.current || !accRes.ok) return;
     const d = accRes.data as AccountTelemetry;
     const updated: AccountTelemetry = {
       ...EMPTY_TELEMETRY,
@@ -96,24 +168,51 @@ export function useCockpit() {
     };
     setTelemetry(updated);
     storage.setAccount(updated);
-  }, []);
+    bumpSessionGen();
+  }, [setTelemetry, bumpSessionGen]);
 
-  // Restore a persisted session on first client mount.
+  // Restore a persisted session on first client mount, validating it with
+  // Supabase (/auth/v1/user, refreshing if needed) before trusting it.
   useEffect(() => {
-    if (storage.isAuthenticated()) {
-      const saved = storage.getAccount();
-      if (saved) {
-        setTelemetry({
-          ...(saved.is_demo ? DEMO_TELEMETRY : EMPTY_TELEMETRY),
-          ...saved,
+    // OAuth redirects are handled by the callback effect below.
+    const isOAuthCallback =
+      typeof window !== "undefined" && window.location.hash.includes("access_token=");
+    const saved = storage.getAccount();
+    const hasSession = Boolean(storage.getSession());
+    let cancelled = false;
+
+    if (!isOAuthCallback) {
+      if (hasSession) {
+        setTelemetry({ ...EMPTY_TELEMETRY, ...(saved && !saved.is_demo ? saved : {}), is_demo: false });
+        setIsAuthenticated(true);
+        void restoreSession().then((result) => {
+          if (cancelled) return;
+          if (result.status === "valid") {
+            setSessionReady(true);
+            if (!saved || saved.is_demo || saved.account_id === "NEW") void loadUserAccounts();
+          } else if (result.status === "offline") {
+            // Keep the session; polling will surface the connectivity error.
+            setSessionReady(true);
+          }
+          // "expired": expireSession() already notified handleSessionExpired.
         });
+      } else if (saved?.is_demo) {
+        setTelemetry({ ...DEMO_TELEMETRY, ...saved, is_demo: true });
+        setIsAuthenticated(true);
+      } else if (saved) {
+        // A real account persisted without a usable session (e.g. from an
+        // older build that only stored the access token): ask to sign in again.
+        storage.clear();
+        setSessionExpired(true);
       }
-      setIsAuthenticated(true);
     }
     setIsMounted(true);
     return () => {
+      cancelled = true;
       if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
     };
+    // Mount-only: restoring must not re-run when callbacks change identity.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Handle Supabase OAuth redirect callback (#access_token=...).
@@ -122,28 +221,45 @@ export function useCockpit() {
     const hash = window.location.hash;
     if (!hash || !hash.includes("access_token=")) return;
 
+    // Remove tokens from the URL before anything else (logging, analytics).
+    window.history.replaceState(null, "", window.location.pathname + window.location.search);
     trackAction("OAUTH_CALLBACK_DETECTED");
-    const params = new URLSearchParams(hash.replace(/^#/, ""));
-    const accessToken = params.get("access_token");
-    if (!accessToken) return;
 
-    storage.setToken(accessToken);
+    const session = sessionFromHash(hash);
+    if (!session) return;
+    storage.setSession(session);
+    let cancelled = false;
 
-    supabaseAuth.getUser(accessToken).then((user) => {
-      if (!user) return;
-      const email = user.email || "";
-      const fullName = user.user_metadata?.full_name || email.split("@")[0] || "Trader";
-      const account: AccountTelemetry = { ...EMPTY_TELEMETRY, account_name: fullName };
-      setTelemetry(account);
-      setIsAuthenticated(true);
-      storage.setAuthenticated(true);
-      storage.setAccount(account);
-      void loadUserAccounts();
-      showToast(`🎉 Welcome, ${fullName}!`);
-      trackAction("GOOGLE_SIGNIN_SUCCESS", { email, id: user.id });
-      window.history.replaceState(null, "", window.location.pathname);
-    });
-  }, [showToast, loadUserAccounts]);
+    supabaseAuth
+      .getUser(session.access_token)
+      .then((user) => {
+        if (cancelled) return;
+        if (!user) {
+          expireSession(); // notifies handleSessionExpired via onSessionExpired
+          return;
+        }
+        const email = user.email || "";
+        const fullName = user.user_metadata?.full_name || email.split("@")[0] || "Trader";
+        const account: AccountTelemetry = { ...EMPTY_TELEMETRY, account_name: fullName };
+        bumpSessionGen();
+        setTelemetry(account);
+        setIsAuthenticated(true);
+        setSessionReady(true);
+        setSessionExpired(false);
+        storage.setAccount(account);
+        void loadUserAccounts();
+        showToast(`🎉 Welcome, ${fullName}!`);
+        trackAction("GOOGLE_SIGNIN_SUCCESS", { id: user.id });
+      })
+      .catch(() => {
+        if (cancelled) return;
+        storage.clearSession();
+        showToast("❌ Could not reach the sign-in server. Please try again.");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [showToast, loadUserAccounts, bumpSessionGen, setTelemetry]);
 
   // Load aggregated portfolio stats once on mount.
   useEffect(() => {
@@ -168,70 +284,103 @@ export function useCockpit() {
     };
   }, []);
 
-  const fetchTelemetry = useCallback(async () => {
-    // Demo mode is fully local — never overwrite the virtual balance.
-    if (telemetry.is_demo) return;
-    // No linked account yet — do not fetch the operator's account.
-    if (telemetry.account_id === "NEW" || telemetry.broker_server === "None") return;
+  /**
+   * Pull live telemetry for `accountId` (defaults to the current account).
+   * Responses are discarded if the session generation or account changed
+   * while the request was in flight.
+   */
+  const fetchTelemetry = useCallback(
+    async (accountId?: string, signal?: AbortSignal) => {
+      const current = telemetryRef.current;
+      // Demo mode is fully local — never overwrite the virtual balance.
+      // No linked account yet — do not fetch the operator's account.
+      if (!accountId && !isLinkedAccount(current)) return;
+      const targetId = accountId || current.account_id;
+      const gen = sessionGenRef.current;
 
-    const res = await api.getAccount(telemetry.account_id);
-    if (!res.ok) return;
-    const data = res.data;
-    if (!data.account_id) return;
+      const res = await api.getAccount(targetId, signal);
+      if (gen !== sessionGenRef.current || telemetryRef.current.account_id !== targetId) return;
+      if (!res.ok) {
+        if (res.aborted || res.status === 401) return; // 401 → session-expired flow
+        setTelemetryError(res.error);
+        return;
+      }
+      setTelemetryError(null);
+      const data = res.data;
+      if (!data.account_id || String(data.account_id) !== targetId) return;
 
-    setTelemetry((prev) => ({
-      ...prev,
-      ...data,
-      account_name: prev.account_name || data.account_name,
-      is_demo: prev.is_demo,
-    }));
-  }, [telemetry.is_demo, telemetry.account_id, telemetry.broker_server]);
+      setTelemetry((prev) => ({
+        ...prev,
+        ...data,
+        account_id: targetId,
+        account_name: prev.account_name || data.account_name,
+        is_demo: prev.is_demo,
+      }));
+    },
+    [setTelemetry]
+  );
 
-  const fetchSignals = useCallback(async () => {
-    const res = await api.getSignals();
-    if (!res.ok) return;
+  const fetchSignals = useCallback(async (signal?: AbortSignal) => {
+    // Demo users are not signed in: never call the authenticated feed.
+    if (telemetryRef.current.is_demo) {
+      setSignals(DEMO_SIGNALS);
+      setSignalsError(null);
+      return;
+    }
+    const gen = sessionGenRef.current;
+    const res = await api.getSignals(signal);
+    if (gen !== sessionGenRef.current) return;
+    if (!res.ok) {
+      if (res.aborted || res.status === 401) return;
+      setSignalsError(res.error);
+      return;
+    }
+    setSignalsError(null);
     setSignals(Array.isArray(res.data.signals) ? res.data.signals : []);
   }, []);
 
   usePolling(
-    () => {
-      void fetchTelemetry();
-      void fetchSignals();
+    async (signal) => {
+      await Promise.all([fetchTelemetry(undefined, signal), fetchSignals(signal)]);
     },
     POLL_INTERVAL_MS,
-    isAuthenticated
+    isAuthenticated && (telemetry.is_demo || sessionReady),
+    sessionGen
   );
 
   const handleLaunchDemo = useCallback(() => {
     const demo = { ...DEMO_TELEMETRY };
+    bumpSessionGen();
     setTelemetry(demo);
+    setSignals(DEMO_SIGNALS);
     setIsAuthenticated(true);
-    storage.setAuthenticated(true);
+    setSessionExpired(false);
     storage.setAccount(demo);
     showToast("🎉 Free Demo Cockpit Activated ($10,000 USD virtual equity)");
     trackAction("CLICK_START_DEMO", { balance: 10000, is_demo: true });
-  }, [showToast]);
+  }, [showToast, bumpSessionGen, setTelemetry]);
 
   const handleGoogleSignIn = useCallback(() => {
     trackAction("CLICK_GOOGLE_AUTH");
-    supabaseAuth.signInWithOAuth("google");
-  }, []);
+    if (!supabaseAuth.signInWithOAuth("google")) showToast(`❌ ${SUPABASE_CONFIG_ERROR}`);
+  }, [showToast]);
 
   const handleToggleAutoPilot = useCallback(async () => {
     if (isTogglingAutoPilot) return;
-    const nextState = !telemetry.autopilot_enabled;
+    const current = telemetryRef.current;
+    const nextState = !current.autopilot_enabled;
     setIsTogglingAutoPilot(true);
     setTelemetry((prev) => ({ ...prev, autopilot_enabled: nextState }));
-    trackAction("TOGGLE_AUTOPILOT", { enabled: nextState, is_demo: telemetry.is_demo });
+    trackAction("TOGGLE_AUTOPILOT", { enabled: nextState, is_demo: current.is_demo });
 
     // Demo / unlinked accounts toggle locally only.
-    if (telemetry.is_demo || telemetry.account_id === "NEW") {
+    if (current.is_demo || current.account_id === "NEW") {
       setIsTogglingAutoPilot(false);
       showToast(nextState ? "⚡ Auto-Pilot Activated (Demo)" : "⏸️ Auto-Pilot Paused (Demo)");
       return;
     }
 
-    const res = await api.toggleAutopilot(telemetry.account_id, nextState);
+    const res = await api.toggleAutopilot(current.account_id, nextState);
     setIsTogglingAutoPilot(false);
 
     if (!res.ok) {
@@ -247,50 +396,67 @@ export function useCockpit() {
           : "⏸️ Auto-Pilot Paused: Manual oversight mode"
       );
     }
-  }, [isTogglingAutoPilot, telemetry.autopilot_enabled, telemetry.is_demo, telemetry.account_id, showToast]);
+  }, [isTogglingAutoPilot, showToast, setTelemetry]);
 
   const handleRiskChange = useCallback(
     async (mode: RiskMode) => {
-      const updated: AccountTelemetry = { ...telemetry, risk_mode: mode };
+      const current = telemetryRef.current;
+      const previousMode = current.risk_mode;
+      const updated: AccountTelemetry = { ...current, risk_mode: mode };
       setTelemetry(updated);
       storage.setAccount(updated);
       trackAction("CHANGE_RISK_MODE", { mode });
-      showToast(`🛡️ Risk Mode updated: ${mode.replace(/_/g, " ")}`);
 
       // Persist server-side only for a linked real account.
-      if (telemetry.is_demo || telemetry.account_id === "NEW" || telemetry.broker_server === "None") {
+      if (!isLinkedAccount(current)) {
+        showToast(`🛡️ Risk Mode updated: ${mode.replace(/_/g, " ")}`);
         return;
       }
-      await api.connect({
-        account_id: telemetry.account_id,
-        broker_server: telemetry.broker_server,
-        account_name: telemetry.account_name,
-        currency: telemetry.currency,
+      const res = await api.connect({
+        account_id: current.account_id,
+        broker_server: current.broker_server,
+        account_name: current.account_name,
+        currency: current.currency,
         risk_mode: mode,
       });
+      if (res.ok && res.data.success !== false) {
+        showToast(`🛡️ Risk Mode updated: ${mode.replace(/_/g, " ")}`);
+        return;
+      }
+      // Roll back if the account is still the same one.
+      if (telemetryRef.current.account_id === current.account_id) {
+        const reverted = { ...telemetryRef.current, risk_mode: previousMode };
+        setTelemetry(reverted);
+        storage.setAccount(reverted);
+      }
+      showToast(
+        `❌ Failed to update Risk Mode: ${res.ok ? res.data.error || "Server rejected change" : res.error}`
+      );
     },
-    [telemetry, showToast]
+    [showToast, setTelemetry]
   );
 
   const handleClosePosition = useCallback(
     async (ticket: number) => {
+      const current = telemetryRef.current;
       setIsClosingTrade(true);
-      trackAction("CLOSE_POSITION", { ticket, is_demo: telemetry.is_demo });
+      trackAction("CLOSE_POSITION", { ticket, is_demo: current.is_demo });
 
-      // Demo positions are simulated locally — no broker call.
-      if (telemetry.is_demo) {
+      // Demo / unlinked-account positions are simulated locally — no broker
+      // call (the backend requires a real account_id for close-trade).
+      if (!isLinkedAccount(current)) {
         setTelemetry((prev) => ({
           ...prev,
           open_positions: prev.open_positions.filter((p) => p.ticket !== ticket),
           floating_pnl: 0,
         }));
         setIsClosingTrade(false);
-        showToast(`✅ Demo Trade #${ticket} closed`);
+        showToast(`✅ ${current.is_demo ? "Demo " : ""}Trade #${ticket} closed`);
         return;
       }
 
-      const position = telemetry.open_positions.find((p) => p.ticket === ticket);
-      const res = await api.closeTrade(ticket, telemetry.account_id, position?.symbol);
+      const position = current.open_positions.find((p) => p.ticket === ticket);
+      const res = await api.closeTrade(ticket, current.account_id, position?.symbol);
       setIsClosingTrade(false);
 
       if (res.ok && res.data.success) {
@@ -304,26 +470,30 @@ export function useCockpit() {
         showToast(`❌ Failed to close Trade #${ticket}: ${res.ok ? res.data.error : res.error}`);
       }
     },
-    [telemetry.is_demo, showToast]
+    [showToast, setTelemetry]
   );
 
   const handleExecuteSignal = useCallback(
     async (signal: ClientSignal): Promise<boolean> => {
+      // Synchronous guard: state updates are async, so a ref blocks double taps.
+      if (executingRef.current) return false;
+      executingRef.current = true;
       setIsExecutingSignal(true);
+      const current = telemetryRef.current;
       trackAction("EXECUTE_1TAP_SIGNAL", {
         symbol: signal.symbol,
         action: signal.action,
         entry: signal.entry,
-        is_demo: telemetry.is_demo,
+        is_demo: current.is_demo,
       });
 
       try {
-        if (!telemetry.is_demo && telemetry.account_id !== "NEW") {
+        if (isLinkedAccount(current)) {
           const res = await api.execute({
-            account_id: telemetry.account_id,
+            account_id: current.account_id,
             symbol: signal.symbol,
             action: signal.action,
-            volume: telemetry.is_demo ? 0.05 : 0.01,
+            volume: 0.01,
             sl: signal.sl,
             tp: signal.tp,
             comment: `Sajim_${signal.action}`,
@@ -336,7 +506,7 @@ export function useCockpit() {
             }
             const position = buildPosition(
               signal,
-              telemetry,
+              current,
               res.data.ticket,
               res.data.volume,
               res.data.price
@@ -354,7 +524,7 @@ export function useCockpit() {
         }
 
         // Demo / unlinked account: simulate locally.
-        const position = buildPosition(signal, telemetry);
+        const position = buildPosition(signal, current);
         setTelemetry((prev) => ({
           ...prev,
           open_positions: [position, ...prev.open_positions],
@@ -365,10 +535,11 @@ export function useCockpit() {
         showToast(`❌ Execution error reaching broker: ${err instanceof Error ? err.message : "Unknown error"}`);
         return false;
       } finally {
+        executingRef.current = false;
         setIsExecutingSignal(false);
       }
     },
-    [telemetry, showToast]
+    [showToast, setTelemetry]
   );
 
   const handleAccountConnected = useCallback(
@@ -379,13 +550,21 @@ export function useCockpit() {
         : {
             ...EMPTY_TELEMETRY,
             ...account,
+            account_id: String(account.account_id ?? EMPTY_TELEMETRY.account_id),
             is_demo: false,
             terminal_connected: true,
           };
 
+      // New account: cancel in-flight requests for the previous one. Bumping
+      // the generation restarts polling, whose immediate tick fetches live
+      // telemetry for `updated.account_id` (read from telemetryRef, which is
+      // set synchronously below — no stale closure).
+      bumpSessionGen();
       setTelemetry(updated);
+      if (isDemo) setSignals(DEMO_SIGNALS);
       setIsAuthenticated(true);
-      storage.setAuthenticated(true);
+      if (!isDemo) setSessionReady(true);
+      setTelemetryError(null);
       storage.setAccount(updated);
       setShowConnectorModal(false);
       showToast(`🤝 Connected: ${updated.broker_server} (#${updated.account_id})`);
@@ -394,36 +573,38 @@ export function useCockpit() {
         id: updated.account_id,
         is_demo: updated.is_demo,
       });
-
-      // Pull fresh live telemetry for a newly linked real account.
-      if (!isDemo && updated.account_id && updated.account_id !== "NEW") {
-        void fetchTelemetry();
-      }
     },
-    [showToast, fetchTelemetry]
+    [showToast, bumpSessionGen, setTelemetry]
   );
 
   const handleAuthSuccess = useCallback(
     (user: AuthUser) => {
       const account: AccountTelemetry = { ...EMPTY_TELEMETRY, account_name: user.fullName };
+      bumpSessionGen();
       setTelemetry(account);
+      setSignals([]);
       setIsAuthenticated(true);
-      storage.setAuthenticated(true);
+      setSessionReady(true);
+      setSessionExpired(false);
       storage.setAccount(account);
       void loadUserAccounts();
       showToast(`🎉 Welcome, ${user.fullName}!`);
-      trackAction("USER_AUTHENTICATED", { email: user.email, id: user.id });
+      trackAction("USER_AUTHENTICATED", { id: user.id });
     },
-    [showToast, loadUserAccounts]
+    [showToast, loadUserAccounts, bumpSessionGen, setTelemetry]
   );
 
-  const handleExitToGate = useCallback(() => {
-    setIsAuthenticated(false);
+  const handleExitToGate = useCallback(async () => {
+    const wasDemo = telemetryRef.current.is_demo;
+    resetToGate();
+    setSessionExpired(false);
+    // Reads the session before clearing it, then revokes it server-side.
+    const revoke = signOutSession();
     storage.clear();
-    setTelemetry(EMPTY_TELEMETRY);
-    setSignals([]);
     showToast("👋 Signed out successfully");
-  }, [showToast]);
+    trackAction("SIGN_OUT", { is_demo: wasDemo });
+    await revoke;
+  }, [resetToGate, showToast]);
 
   const handleManualRefresh = useCallback(async () => {
     setIsRefreshing(true);
@@ -445,19 +626,32 @@ export function useCockpit() {
   }, []);
 
   const closeConnector = useCallback(() => setShowConnectorModal(false), []);
-  const openAuth = useCallback(() => setShowAuthModal(true), []);
+  const openAuth = useCallback(() => {
+    setAuthMode("signup");
+    setShowAuthModal(true);
+  }, []);
+  const openSignIn = useCallback(() => {
+    setAuthMode("signin");
+    setShowAuthModal(true);
+  }, []);
   const closeAuth = useCallback(() => setShowAuthModal(false), []);
   const openRiskSheet = useCallback(() => setShowRiskSheet(true), []);
   const closeRiskSheet = useCallback(() => setShowRiskSheet(false), []);
+  const dismissSessionExpired = useCallback(() => setSessionExpired(false), []);
 
   const handleScrollToSignals = useCallback(() => {
     signalsSectionRef.current?.scrollIntoView({ behavior: "smooth" });
   }, []);
 
+  const connectionError = telemetryError || signalsError;
+
   return {
     // UI state
     isMounted,
     isAuthenticated,
+    sessionExpired,
+    authConfigError: isSupabaseConfigured ? null : SUPABASE_CONFIG_ERROR,
+    connectionError,
     telemetry,
     signals,
     gateStats,
@@ -466,6 +660,7 @@ export function useCockpit() {
     showConnectorModal,
     connectorTab,
     showAuthModal,
+    authMode,
     showRiskSheet,
     // busy flags
     isTogglingAutoPilot,
@@ -480,9 +675,11 @@ export function useCockpit() {
     openConnectorReal,
     closeConnector,
     openAuth,
+    openSignIn,
     closeAuth,
     openRiskSheet,
     closeRiskSheet,
+    dismissSessionExpired,
     onLaunchDemo: handleLaunchDemo,
     onGoogleSignIn: handleGoogleSignIn,
     onToggleAutoPilot: handleToggleAutoPilot,

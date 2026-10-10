@@ -1,6 +1,7 @@
-import type { AccountTelemetry, RiskMode } from "./types";
+import type { AccountTelemetry, ClientSignal, RiskMode } from "./types";
 
-export const AFFILIATE_URL = "https://headway.partners/user/signup?hwp=b158cc";
+export const AFFILIATE_URL =
+  process.env.NEXT_PUBLIC_HEADWAY_AFFILIATE_URL || "https://headway.partners/user/signup?hwp=b158cc";
 
 export const RISK_MODES: { id: RiskMode; title: string; subtitle: string }[] = [
   {
@@ -56,6 +57,50 @@ export const EMPTY_TELEMETRY: AccountTelemetry = {
   is_demo: false,
 };
 
-// Pre-filled demo credentials for the free demo tab.
-export const DEMO_ACCOUNT_ID = "1200442972";
-export const DEMO_PASSWORD = "demo1234";
+/**
+ * Static sample signals shown in demo mode. Demo users are not signed in, so
+ * the authenticated /api/client/signals feed is never called for them; these
+ * are illustrative only and are clearly labelled "DEMO" in the UI.
+ */
+export const DEMO_SIGNALS: ClientSignal[] = [
+  {
+    id: "demo-xauusd",
+    symbol: "XAUUSD",
+    timeframe: "M15",
+    action: "BUY",
+    entry: 2350.0,
+    sl: 2342.5,
+    tp: 2365.0,
+    rr: "1:2",
+    strategy: "DEMO SAMPLE",
+    phase: "DEMO",
+    win_probability: "DEMO",
+    gain_estimate_usd: "+$75.00",
+    risk_estimate_usd: "-$37.50",
+    expected_duration: "~45 min",
+    trade_health_status: "DEMO",
+    trade_explainer: "Sample signal for the demo cockpit — not live market data.",
+    timestamp: "1970-01-01T00:00:00Z",
+    one_tap_ready: true,
+  },
+  {
+    id: "demo-eurusd",
+    symbol: "EURUSD",
+    timeframe: "H1",
+    action: "SELL",
+    entry: 1.085,
+    sl: 1.0875,
+    tp: 1.08,
+    rr: "1:2",
+    strategy: "DEMO SAMPLE",
+    phase: "DEMO",
+    win_probability: "DEMO",
+    gain_estimate_usd: "+$50.00",
+    risk_estimate_usd: "-$25.00",
+    expected_duration: "~3 h",
+    trade_health_status: "DEMO",
+    trade_explainer: "Sample signal for the demo cockpit — not live market data.",
+    timestamp: "1970-01-01T00:00:00Z",
+    one_tap_ready: true,
+  },
+];

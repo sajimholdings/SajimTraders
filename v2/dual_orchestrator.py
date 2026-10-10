@@ -34,7 +34,9 @@ import MetaTrader5 as mt5
 from v2.coexistence import CoexistenceGatekeeper, MAGIC_V1, MAGIC_V2
 from bots.sajim_server_overnight import SajimOvernightServer
 from v2.sajim_v2_dual_bot import SajimV2DualBot
+from v2.safety import utc_now, utc_day_start
 from core.ctrader_bridge import CTraderBridge
+from core.mt5_login import ensure_account
 
 logger = logging.getLogger("DualOrchestrator")
 logging.basicConfig(
@@ -54,11 +56,11 @@ class SajimDualOrchestrator:
         max_combined_positions: int = 12,
         max_v1_positions: int = 6,
         max_v2_positions: int = 6,
-        base_risk_v1: float = 0.012,
-        base_risk_v2: float = 0.012,
+        base_risk_v1: float = 0.01,
+        base_risk_v2: float = 0.01,
         dry_run: bool = False,
         target_account: Optional[int] = None,
-        broker: str = "auto",
+        broker: str = "mt5",
     ):
         self.scan_interval = scan_interval_seconds
         self.max_combined = max_combined_positions
@@ -66,7 +68,11 @@ class SajimDualOrchestrator:
         self.max_v2_positions = max_v2_positions
         self.dry_run = dry_run
         self.target_account = target_account
-        self.broker = broker.lower()
+        # "auto" is accepted for backward compatibility but means MT5: there is no silent
+        # switch to cTrader. cTrader must be requested explicitly with broker="ctrader".
+        self.broker = (broker or "mt5").lower()
+        if self.broker == "auto":
+            self.broker = "mt5"
         self.ctrader = CTraderBridge.get_instance()
 
         # Shared Coexistence Gatekeeper
@@ -92,6 +98,7 @@ class SajimDualOrchestrator:
             gatekeeper=self.gatekeeper,
             base_risk_fraction=base_risk_v2,
             dry_run=dry_run,
+            broker=self.broker,
         )
 
         self.last_scan_time = 0.0
@@ -103,6 +110,9 @@ class SajimDualOrchestrator:
             logger.info("[+] Connecting to headless cTrader Open API Cloud Bridge...")
             if self.ctrader.connect():
                 acc_telemetry = self.ctrader.get_account_telemetry()
+                if acc_telemetry.get("balance") is None or acc_telemetry.get("equity") is None:
+                    logger.critical("[cTrader] Connected but no account balance/equity available. Aborting.")
+                    return False
                 self.gatekeeper.refresh_account_state(
                     balance=acc_telemetry["balance"],
                     equity=acc_telemetry["equity"],
@@ -111,8 +121,9 @@ class SajimDualOrchestrator:
                     currency=acc_telemetry["currency"],
                     active_positions=self.ctrader.get_positions(),
                 )
-                logger.info(f"[+] cTrader Connected: Account {acc_telemetry['account_id']} | Equity: ${acc_telemetry['equity']:,.2f}")
+                logger.info(f"[+] cTrader Connected: Account {acc_telemetry['account_id']} | Equity: {acc_telemetry['equity']:,.2f}")
                 return True
+            logger.critical("[cTrader] Connection failed (see bridge log). Aborting.")
             return False
 
         # Connect to currently running MT5 terminal first; fallback to launch Headway if closed
@@ -130,52 +141,19 @@ class SajimDualOrchestrator:
             init_ok = False
 
         if not init_ok:
-            if self.broker == "auto":
-                logger.info("[*] MT5 terminal not detected. Seamlessly activating cTrader Open API Cloud Bridge...")
-                self.broker = "ctrader"
-                return self.connect()
-            logger.critical(f"Failed to initialize MT5 terminal: {mt5.last_error() if hasattr(mt5, 'last_error') else 'Not installed'}")
+            # Fail loudly: never silently switch a live MT5 session to another broker.
+            logger.critical(
+                f"Failed to initialize MT5 terminal: {mt5.last_error() if hasattr(mt5, 'last_error') else 'Not installed'}. "
+                f"Use --broker ctrader explicitly to run on cTrader."
+            )
             return False
 
-        # Load broker configuration if available
-        broker_cfg = {}
-        cfg_path = os.path.join(ROOT_DIR, "config", "broker_config.json")
-        if os.path.exists(cfg_path):
-            try:
-                with open(cfg_path, "r", encoding="utf-8") as f:
-                    broker_cfg = json.load(f)
-            except Exception:
-                pass
-
-        target_acc = self.target_account or broker_cfg.get("active_account")
-        accounts_map = broker_cfg.get("accounts", {})
-        target_str = str(target_acc) if target_acc else ""
-        if target_str in accounts_map:
-            pwd = accounts_map[target_str].get("password", broker_cfg.get("password"))
-            srv = accounts_map[target_str].get("server", broker_cfg.get("server"))
-        else:
-            pwd = broker_cfg.get("password")
-            srv = broker_cfg.get("server")
-
-        acc = mt5.account_info()
-        if target_acc and (acc is None or acc.login != target_acc):
-            logger.info(f"Switching active account to {target_acc} on server '{srv}'...")
-            if pwd and srv:
-                mt5.login(login=int(target_acc), password=pwd, server=srv)
-            elif srv:
-                mt5.login(login=int(target_acc), server=srv)
-            else:
-                mt5.login(login=int(target_acc))
-            acc = mt5.account_info()
-
+        acc = ensure_account(mt5, self.target_account, logger=logger)
         if not acc:
-            logger.critical("No active MT5 trading account found.")
-            return False
-
-        if target_acc is not None and acc.login != target_acc:
-            logger.critical(f"[SECURITY LOCK] Connected to {acc.login}, expected {target_acc}. Aborting.")
+            logger.critical("No active MT5 trading account found (or wrong account). Aborting.")
             mt5.shutdown()
             return False
+        target_acc = int(acc.login)
 
         # Initialize V1 Server (only if V1 is enabled)
         if self.max_v1_positions > 0 and self.gatekeeper.v1_enabled:
@@ -210,6 +188,11 @@ class SajimDualOrchestrator:
         if self.broker == "ctrader":
             telemetry = self.ctrader.get_account_telemetry()
             positions = self.ctrader.get_positions()
+            if telemetry.get("balance") is None or telemetry.get("equity") is None:
+                logger.error("[cTrader] No account data; gatekeeper not refreshed (entries stay blocked).")
+                self.gatekeeper.circuit_breaker_active = True
+                self.gatekeeper.circuit_breaker_reason = "cTrader account data unavailable"
+                return
             self.gatekeeper.refresh_account_state(
                 balance=telemetry["balance"],
                 equity=telemetry["equity"],
@@ -217,13 +200,16 @@ class SajimDualOrchestrator:
                 margin_level_pct=1000.0,
                 currency=telemetry["currency"],
                 active_positions=positions,
+                today_deals=[
+                    d for d in self.ctrader.get_deals(limit=500)
+                    if str(d.get("close_time", "")) >= utc_day_start().isoformat()
+                ],
             )
             return
 
         acc = mt5.account_info()
         positions = mt5.positions_get() or []
-        today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-        deals = mt5.history_deals_get(today_start, datetime.now() + timedelta(minutes=5)) or []
+        deals = mt5.history_deals_get(utc_day_start(), utc_now() + timedelta(minutes=5)) or []
         self.gatekeeper.refresh(account_info=acc, all_positions=positions, today_deals=deals)
 
     def execute_dual_pass(self) -> None:

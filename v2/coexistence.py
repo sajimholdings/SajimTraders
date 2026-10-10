@@ -13,18 +13,23 @@ Core Governance Pillars:
      - Sajim V2: 888222 (comments: Sajim_V2_Continuation, Sajim_V2_Reversion)
      Neither bot ever modifies, trails, or closes positions belonging to the other.
   2. AGGREGATE MARGIN & POSITION CAP:
-     - Caps total open tickets across both bots (default: max 6 positions total).
+     - Caps total open tickets across both bots (default: max 2 positions total;
+       the dual orchestrator passes its own --max-combined value).
      - Margin Level must stay >= 500% to permit new entries.
   3. DIRECTIONAL CONFLICT SHIELD:
      - Blocks opposing trades on the same currency pair (e.g. V1 BUY vs V2 SELL).
      - Eliminates self-hedging broker spread cannibalization.
   4. MACRO CURRENCY CLUSTER EXPOSURE CAP:
-     - Max 2 positions per single currency (USD, EUR, GBP, JPY, CAD, AUD, NZD, CHF, XAU)
+     - Max 1 position per single currency (USD, EUR, GBP, JPY, CAD, AUD, NZD, CHF, XAU)
        across the entire portfolio combined.
-  5. UNIFIED ACCOUNT 5% DAILY DRAWDOWN CIRCUIT BREAKER:
-     - Sums closed and floating daily PnL across all tickets.
+  5. UNIFIED ACCOUNT 5% DAILY DRAWDOWN CIRCUIT BREAKER (UTC day):
+     - Drawdown = start-of-day equity - current equity (closed + floating P&L,
+       commissions and swaps all included). Evaluated for MT5 AND cTrader refreshes.
      - Halts new entries for both bots if account drops >= 5.0% on the day.
-  6. REAL-TIME WEBAPP TELEMETRY:
+     - Capital floors are defined in USD and normalised for cent (USC) accounts.
+  6. GLOBAL KILL SWITCH: KILL_SWITCH file in repo root or SAJIM_KILL_SWITCH=1 blocks
+     every new entry (see v2/safety.py).
+  7. REAL-TIME WEBAPP TELEMETRY:
      - Emits v2/coexistence_status.json continuously for external WebApp integration.
 ========================================================================================
 """
@@ -34,17 +39,33 @@ import sys
 import json
 import logging
 from datetime import datetime, timedelta
+from types import SimpleNamespace
 from typing import Dict, Any, List, Optional, Tuple, Set
+
+from v2.safety import (
+    DailyDrawdownGuard, kill_switch_active, to_major_units, from_major_units, KILL_SWITCH_FILE,
+)
 
 logger = logging.getLogger("CoexistenceGatekeeper")
 
 MAGIC_V1 = 777999
 MAGIC_V2 = 888222
 
-MAX_COMBINED_POSITIONS = 2   # Max 2 trades total (e.g. 1 Gold + 1 Nasdaq)
-MIN_MARGIN_LEVEL_PCT = 200.0
-MAX_CLUSTER_EXPOSURE = 1     # Strict 1 position per asset (Zero over-concentration)
-MAX_DAILY_DRAWDOWN_PCT = 0.50 # 50% max daily risk (Generous buffer for flipping)
+MAX_COMBINED_POSITIONS = 2    # Max 2 trades total (e.g. 1 Gold + 1 Nasdaq)
+MIN_MARGIN_LEVEL_PCT = 500.0   # Margin level must stay >= 500% for new entries
+MAX_CLUSTER_EXPOSURE = 1       # Strict 1 position per currency (zero over-concentration)
+MAX_DAILY_DRAWDOWN_PCT = 0.05  # 5% max daily drawdown on start-of-day equity
+
+# Capital floors in USD (normalised: a USC account's equity is divided by 100 first)
+EMERGENCY_EQUITY_FLOOR_USD = 20.0
+# (high-watermark USD, protected floor USD), checked top-down
+WATERMARK_FLOORS_USD = [
+    (200.0, 170.0),
+    (150.0, 125.0),
+    (125.0, 105.0),
+    (100.0, 85.0),
+    (85.0, 72.0),
+]
 
 
 class CoexistenceGatekeeper:
@@ -96,6 +117,12 @@ class CoexistenceGatekeeper:
         self.v1_enabled: bool = True
         self.v2_enabled: bool = True
 
+        # UTC daily drawdown (in-memory baseline per gatekeeper instance; the bots keep
+        # their own persisted baselines)
+        self.daily_guard = DailyDrawdownGuard("coexistence", max_dd_pct=self.max_daily_dd_pct, persist=False)
+        self.day_start_equity: float = 0.0
+        self.today_drawdown: float = 0.0
+
     @staticmethod
     def get_currencies_for_symbol(symbol: str) -> List[str]:
         """Extracts underlying currency codes from symbol (e.g. 'EURUSD.c' -> ['EUR', 'USD'])."""
@@ -142,12 +169,18 @@ class CoexistenceGatekeeper:
                 self.other_positions.append(p)
 
         self.today_floating_pnl = round(total_float, 2)
-        closed_pnl = sum(float(d.get("profit", 0.0)) for d in (today_deals or []))
+        closed_pnl = sum(
+            float(d.get("profit", 0.0) or 0.0) + float(d.get("commission", 0.0) or 0.0)
+            + float(d.get("swap", 0.0) or 0.0) + float(d.get("fee", 0.0) or 0.0)
+            for d in (today_deals or [])
+        )
         self.today_closed_pnl = round(closed_pnl, 2)
 
-        if self.account_equity > self.high_watermark_equity:
-            self.high_watermark_equity = self.account_equity
-
+        acc = SimpleNamespace(
+            balance=self.account_balance, equity=self.account_equity,
+            currency=self.currency, login="ctrader",
+        )
+        self._evaluate_protection(acc, today_deals or [])
         self.save_status()
 
     def refresh(
@@ -210,46 +243,49 @@ class CoexistenceGatekeeper:
 
         self.today_closed_pnl = round(closed_pnl, 2)
 
-        # Dynamic High-Watermark Capital Preservation Vault
+        self._evaluate_protection(account_info, today_deals)
+
+        # Emit updated JSON telemetry
+        self.save_status()
+
+    def _evaluate_protection(self, account_info: Any, today_deals: List[Any]) -> None:
+        """
+        Updates the high-watermark floor and the UTC daily drawdown circuit breaker.
+        Floors are defined in USD and converted to account units (USC on cent accounts).
+        """
         if self.account_equity > self.high_watermark_equity:
             self.high_watermark_equity = self.account_equity
 
-        # Ratchet protected capital floor as account grows:
-        if self.high_watermark_equity >= 200.0:
-            self.protected_capital_floor = 170.0
-        elif self.high_watermark_equity >= 150.0:
-            self.protected_capital_floor = 125.0
-        elif self.high_watermark_equity >= 125.0:
-            self.protected_capital_floor = 105.0
-        elif self.high_watermark_equity >= 100.0:
-            self.protected_capital_floor = 85.0
-        elif self.high_watermark_equity >= 85.0:
-            self.protected_capital_floor = 72.0
-        else:
-            self.protected_capital_floor = 0.0
+        hw_usd = to_major_units(self.high_watermark_equity, self.currency)
+        floor_usd = 0.0
+        for hw_threshold, floor in WATERMARK_FLOORS_USD:
+            if hw_usd >= hw_threshold:
+                floor_usd = floor
+                break
+        self.protected_capital_floor = from_major_units(floor_usd, self.currency)
 
-        # Evaluate Daily Circuit Breaker & Watermark Floor
-        net_daily_pnl = self.today_closed_pnl + min(0.0, self.today_floating_pnl)
-        max_allowed_loss = self.account_balance * self.max_daily_dd_pct
+        dd = self.daily_guard.evaluate(account_info, today_deals) if account_info is not None else None
+        if dd is not None:
+            self.day_start_equity = float(dd.get("start_equity") or 0.0)
+            self.today_drawdown = float(dd.get("drawdown") or 0.0)
+
         if self.protected_capital_floor > 0 and self.account_equity <= self.protected_capital_floor:
             self.circuit_breaker_active = True
             self.circuit_breaker_reason = (
-                f"🛡️ Protected Capital Watermark Floor Reached (${self.account_equity:.2f} <= ${self.protected_capital_floor:.2f}) "
-                f"from peak ${self.high_watermark_equity:.2f}. Banked profits locked!"
+                f"🛡️ Protected Capital Watermark Floor Reached ({self.account_equity:.2f} <= {self.protected_capital_floor:.2f} "
+                f"{self.currency}) from peak {self.high_watermark_equity:.2f}. Banked profits locked!"
             )
             logger.critical(f"[PROTECTED CAPITAL ENGAGED] {self.circuit_breaker_reason}")
-        elif net_daily_pnl < 0 and abs(net_daily_pnl) >= max_allowed_loss and self.account_balance > 0:
+        elif dd is not None and not dd["ok"] and self.account_balance > 0:
             self.circuit_breaker_active = True
             self.circuit_breaker_reason = (
-                f"Combined daily net loss ({net_daily_pnl:.2f} {self.currency}) >= "
-                f"50% limit ({max_allowed_loss:.2f} {self.currency})"
+                f"Combined daily drawdown {dd['drawdown']:.2f} {self.currency} >= "
+                f"{self.max_daily_dd_pct*100:.1f}% limit ({dd['limit']:.2f} {self.currency}) "
+                f"of start-of-day equity {dd['start_equity']:.2f}"
             )
         else:
             self.circuit_breaker_active = False
             self.circuit_breaker_reason = ""
-
-        # Emit updated JSON telemetry
-        self.save_status()
 
     def check_pre_entry_clearance(
         self,
@@ -274,12 +310,20 @@ class CoexistenceGatekeeper:
         if bot_name.upper() == "V2" and not self.v2_enabled:
             return False, "Sajim V2 is currently toggled OFF in gatekeeper"
 
-        # 2. Daily Circuit Breaker & Emergency Safety Floor
-        if self.account_equity > 0 and self.account_equity < 20.0:
-            return False, f"🛑 Emergency Capital Floor Triggered: Equity ${self.account_equity:.2f} < $20.00 safety reserve."
+        # 1b. Global kill switch
+        if kill_switch_active():
+            return False, f"🛑 Global kill switch engaged ({KILL_SWITCH_FILE} or SAJIM_KILL_SWITCH=1)"
 
+        # 2. Daily Circuit Breaker & Emergency Safety Floor (USD-normalised)
         if self.circuit_breaker_active:
             return False, f"🛑 Circuit Breaker Active: {self.circuit_breaker_reason}"
+
+        equity_usd = to_major_units(self.account_equity, self.currency)
+        if self.account_equity > 0 and equity_usd < EMERGENCY_EQUITY_FLOOR_USD:
+            return False, (
+                f"🛑 Emergency Capital Floor Triggered: Equity {self.account_equity:.2f} {self.currency} "
+                f"(${equity_usd:.2f}) < ${EMERGENCY_EQUITY_FLOOR_USD:.2f} safety reserve."
+            )
 
         # 3. Aggregate Combined Position Ceiling
         total_open = len(self.v1_positions) + len(self.v2_positions) + len(self.other_positions)
@@ -340,6 +384,8 @@ class CoexistenceGatekeeper:
                 "today_closed": self.today_closed_pnl,
                 "today_floating": self.today_floating_pnl,
                 "combined_daily_net": round(self.today_closed_pnl + self.today_floating_pnl, 2),
+                "day_start_equity_utc": round(self.day_start_equity, 2),
+                "today_drawdown": round(self.today_drawdown, 2),
             },
             "circuit_breaker": {
                 "active": self.circuit_breaker_active,
@@ -355,6 +401,7 @@ class CoexistenceGatekeeper:
             "toggles": {
                 "v1_enabled": self.v1_enabled,
                 "v2_enabled": self.v2_enabled,
+                "kill_switch_active": kill_switch_active(),
             },
             "positions": {
                 "v1": self.v1_positions,

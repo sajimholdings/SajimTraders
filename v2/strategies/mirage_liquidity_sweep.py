@@ -21,7 +21,10 @@ from v2.engine.liquidity_sweep_engine import (
     MirageLiquiditySweepEngine,
     LiquiditySweepSignal,
 )
-from core.beep_processor import BeepSnipeFilter, BeepSnipeEvaluation
+try:
+    from core.beep_processor import BeepSnipeFilter, BeepSnipeEvaluation  # private BEEP module (optional)
+except ImportError:  # pragma: no cover - depends on private modules
+    BeepSnipeFilter, BeepSnipeEvaluation = None, None
 
 
 class MirageLiquiditySweepCartridge(BaseStrategyCartridge):
@@ -72,7 +75,9 @@ class MirageLiquiditySweepCartridge(BaseStrategyCartridge):
             confirm_window=confirm_window,
             sl_buffer=sl_buffer,
         )
-        self.snipe_filter = BeepSnipeFilter(min_snipe_score=min_beep_score)
+        if use_beep_filter and BeepSnipeFilter is None:
+            raise ImportError("use_beep_filter=True requires the private BEEP module core.beep_processor (not in this repo)")
+        self.snipe_filter = BeepSnipeFilter(min_snipe_score=min_beep_score) if BeepSnipeFilter is not None else None
         self.parameters = {
             "swing_len": swing_len,
             "lookback_bars": lookback_bars,

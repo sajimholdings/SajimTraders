@@ -14,8 +14,24 @@ Role:
   - Optionally mirrors active V2 signals onto the account (Auto-Pilot).
 
 Design note: this is one-worker-per-account. Launch one instance per client account,
-each attaching to its own MT5 terminal. The same code runs unchanged on a local PC
+each attaching to its own MT5 terminal (see scripts/bridge_supervisor.py for the
+per-account terminal convention). The same code runs unchanged on a local PC
 (testing a few accounts) or a Windows VPS (scaling to many).
+
+Safety rules enforced every loop iteration:
+  - The terminal's logged-in login must equal the expected login, otherwise no order is
+    executed and the worker re-initializes (another process may have switched it).
+  - The trading_accounts row is re-read every ACCOUNT_REFRESH_SECONDS: deletion stops
+    the worker, autopilot OFF stops mirroring.
+  - Only orders whose user_id matches the account owner are executed.
+  - Orders are claimed atomically (PENDING -> PROCESSING); orders stuck in PROCESSING
+    longer than STALE_PROCESSING_MINUTES are marked FAILED (never auto-retried, to
+    avoid double execution).
+  - CLOSE orders are close requests, never reconciled as positions.
+  - A closed position is only recorded once deal history is available (retried later
+    otherwise) and trade_history inserts are idempotent per (account_id, ticket).
+  - Autopilot mirrors only active, unexpired signals created within
+    AUTOPILOT_MAX_SIGNAL_AGE_MINUTES.
 
 Secrets: broker credentials come from the environment / CLI (never hardcoded).
 Supabase service-role key comes from SUPABASE_SERVICE_ROLE_KEY (server-side only).
@@ -24,9 +40,8 @@ Supabase service-role key comes from SUPABASE_SERVICE_ROLE_KEY (server-side only
 import os
 import sys
 import time
-import json
 import argparse
-from datetime import datetime, timedelta
+from datetime import datetime
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -47,6 +62,10 @@ from core.supabase_bridge import SupabaseBridge
 from core.mt5_login import get_login_kwargs
 
 MAGIC_V2 = 888222
+ACCOUNT_REFRESH_SECONDS = float(os.environ.get("ACCOUNT_REFRESH_SECONDS", "30"))
+STALE_PROCESSING_MINUTES = float(os.environ.get("STALE_PROCESSING_MINUTES", "5"))
+AUTOPILOT_MAX_SIGNAL_AGE_MINUTES = float(os.environ.get("AUTOPILOT_MAX_SIGNAL_AGE_MINUTES", "10"))
+LEGACY_SEED_SIGNAL_IDS = {"SIG_XAU_LIVE_01"}
 
 
 def log(msg: str):
@@ -180,7 +199,11 @@ def close_position_by_ticket(ticket: int) -> dict:
 
 
 def get_closed_position_result(ticket: int) -> dict:
-    """Returns (close_price, net_profit, close_time) for a position that has closed."""
+    """Returns (close_price, net_profit, close_time) for a position that has closed.
+
+    Returns {} when the closing (OUT) deal is not in history yet — the caller must retry
+    later instead of recording a 0-profit close.
+    """
     try:
         deals = mt5.history_deals_get(position=ticket)
         if not deals:
@@ -188,13 +211,17 @@ def get_closed_position_result(ticket: int) -> dict:
         net = 0.0
         close_price = None
         close_time = None
+        has_out = False
         for d in deals:
-            if getattr(d, "entry", None) == mt5.DEAL_ENTRY_OUT:
+            if getattr(d, "entry", None) in (mt5.DEAL_ENTRY_OUT, getattr(mt5, "DEAL_ENTRY_OUT_BY", -1)):
+                has_out = True
                 net += float(d.profit) + float(d.swap) + float(d.commission)
                 if close_price is None:
                     close_price = d.price
                 if close_time is None and d.time:
                     close_time = datetime.fromtimestamp(d.time).isoformat()
+        if not has_out or close_price is None:
+            return {}
         return {
             "close_price": close_price,
             "net_profit": round(net, 2),
@@ -256,6 +283,96 @@ def compute_today_pnl(account_currency: str = "USD") -> tuple:
         return (0.0, 0.0)
 
 
+def _attach(init_kwargs: dict) -> bool:
+    for _ in range(3):
+        try:
+            if mt5.initialize(**init_kwargs):
+                return True
+        except Exception:
+            pass
+        time.sleep(0.5)
+    return False
+
+
+def _execute_pending(bridge: SupabaseBridge, account_id: str, owner_id: str) -> None:
+    """Execute PENDING orders for this account that belong to its owner."""
+    for order in bridge.get_pending_orders(account_id):
+        oid = order.get("id")
+        if not oid:
+            continue
+        if str(order.get("user_id") or "") != str(owner_id):
+            if bridge.claim_order(oid):
+                bridge.update_order_status(oid, "REJECTED", error_message="Order user does not own this account")
+                log(f"⛔ Rejected order {oid}: user_id does not match account owner")
+            continue
+        # Atomic PENDING -> PROCESSING claim: if it fails, someone else has it.
+        if not bridge.claim_order(oid):
+            continue
+
+        action = str(order.get("action", "")).upper()
+        if action == "CLOSE":
+            close_ticket = order.get("close_ticket")
+            if not close_ticket:
+                bridge.update_order_status(oid, "REJECTED", error_message="close_ticket missing")
+                continue
+            res = close_position_by_ticket(int(close_ticket))
+            if res.get("success"):
+                # A CLOSE order is a request, not a position: it is excluded from
+                # list_open_positions (action filter) so it is never reconciled.
+                bridge.update_order_status(oid, "FILLED", open_price=res.get("close_price"))
+                log(f"📤 CLOSE order {oid} executed (closed #{close_ticket})")
+            else:
+                bridge.update_order_status(oid, "REJECTED", error_message=res.get("error"))
+                log(f"❌ CLOSE order {oid} rejected: {res.get('error')}")
+        elif action in ("BUY", "SELL"):
+            res = execute_market_order(order)
+            if res.get("success"):
+                bridge.update_order_status(oid, "FILLED", mt5_ticket=int(res["ticket"]), open_price=res.get("price"))
+            else:
+                bridge.update_order_status(oid, "REJECTED", error_message=res.get("error"))
+        else:
+            bridge.update_order_status(oid, "REJECTED", error_message=f"Unknown action {action}")
+
+
+def _reconcile_positions(bridge: SupabaseBridge, account_id: str, owner_id: str, tel: dict) -> None:
+    """Sync FILLED BUY/SELL orders against live positions; record closes exactly once."""
+    live_map = {p["ticket"]: p for p in tel.get("open_positions", [])} if tel else {}
+    for o in bridge.list_open_positions(account_id, user_id=owner_id):
+        ticket = o.get("mt5_ticket")
+        if not ticket:
+            continue
+        if int(ticket) in live_map:
+            lp = live_map[int(ticket)]
+            bridge.update_position_pnl(o["id"], lp["current_price"], lp["pnl"])
+            continue
+
+        closed = get_closed_position_result(int(ticket))
+        if not closed:
+            # Deal history not available yet — retry next loop rather than closing at 0.
+            continue
+
+        hist = bridge.insert_trade_history({
+            "user_id": owner_id,
+            "account_id": account_id,
+            "mt5_ticket": int(ticket),
+            "symbol": o.get("symbol", ""),
+            "action": o.get("action", "BUY"),
+            "volume": o.get("volume", 0.01),
+            "open_price": o.get("open_price") or 0.0,
+            "close_price": closed["close_price"],
+            "profit": closed["net_profit"],
+            "net_pnl": closed["net_profit"],
+            "open_time": o.get("executed_at") or o.get("created_at"),
+            "close_time": closed.get("close_time") or datetime.now().isoformat(),
+            "comment": o.get("comment", ""),
+        })
+        if isinstance(hist, dict) and "error" in hist:
+            log(f"⚠️ trade_history insert failed for #{ticket}; will retry: {hist.get('error')}")
+            continue
+        bridge.mark_order_closed(o["id"], closed["close_price"], closed["net_profit"])
+        log(f"🏁 Reconciled order {o['id']} -> CLOSED (ticket #{ticket}, PnL {closed['net_profit']})")
+
+
 def run_bridge(args):
     if not MT5_INSTALLED:
         log("❌ MetaTrader5 package is not installed. Run: pip install MetaTrader5")
@@ -267,11 +384,12 @@ def run_bridge(args):
         return 1
 
     # --- Connect to MT5 terminal ---
-    attached = False
     init_kwargs = get_login_kwargs()
     # CLI/env overrides take precedence over broker_config.json
     if args.terminal_path:
         init_kwargs["path"] = args.terminal_path
+    if args.portable:
+        init_kwargs["portable"] = True
     if args.login:
         init_kwargs["login"] = int(args.login)
         if args.password:
@@ -279,15 +397,7 @@ def run_bridge(args):
         if args.server:
             init_kwargs["server"] = args.server
 
-    for _ in range(3):
-        try:
-            if mt5.initialize(**init_kwargs):
-                attached = True
-                break
-        except Exception:
-            pass
-        time.sleep(0.5)
-
+    attached = _attach(init_kwargs)
     if not attached and not init_kwargs:
         # Last resort: attach to whatever terminal is already running.
         attached = bool(mt5.initialize())
@@ -302,9 +412,18 @@ def run_bridge(args):
         mt5.shutdown()
         return 1
 
-    account_id = str(acc.login)
-    account = bridge.get_trading_account(account_id)
+    expected_login = int(args.login) if args.login else int(acc.login)
+    if int(acc.login) != expected_login:
+        log(f"❌ Terminal is logged into #{acc.login}, expected #{expected_login}. Refusing to run.")
+        mt5.shutdown()
+        return 1
+
+    account_id = str(expected_login)
+    broker_server = args.server or acc.server
+    account = bridge.get_trading_account(account_id, broker_server=broker_server)
     user_id = account.get("user_id") if account else None
+    last_account_refresh = time.time()
+    last_stale_check = 0.0
 
     log("=" * 60)
     log(f"✅ CONNECTED TO MT5 TERMINAL")
@@ -319,67 +438,47 @@ def run_bridge(args):
             acc = mt5.account_info()
             if not acc:
                 log("⚠️ MT5 connection dropped. Reconnecting...")
-                mt5.initialize(**init_kwargs)
+                _attach(init_kwargs)
                 time.sleep(2)
                 continue
 
-            # 1. Execute pending orders
-            pending = bridge.get_pending_orders(account_id)
-            for order in pending:
-                oid = order.get("id")
-                action = str(order.get("action", "")).upper()
-                bridge.update_order_status(oid, "PROCESSING")
+            # 0a. Login guard: never trade on whatever account the terminal switched to.
+            if int(acc.login) != expected_login:
+                log(f"⛔ Terminal switched to #{acc.login} (expected #{expected_login}). "
+                    f"Skipping execution and re-initializing.")
+                mt5.shutdown()
+                time.sleep(2)
+                _attach(init_kwargs)
+                time.sleep(args.interval)
+                continue
 
-                if action == "CLOSE":
-                    close_ticket = order.get("close_ticket")
-                    if not close_ticket:
-                        bridge.update_order_status(oid, "REJECTED", error_message="close_ticket missing")
-                        continue
-                    res = close_position_by_ticket(int(close_ticket))
-                    if res.get("success"):
-                        bridge.update_order_status(oid, "FILLED", mt5_ticket=int(close_ticket), open_price=res.get("close_price"))
-                        log(f"📤 CLOSE order {oid} executed (closed #{close_ticket})")
-                    else:
-                        bridge.update_order_status(oid, "REJECTED", error_message=res.get("error"))
-                        log(f"❌ CLOSE order {oid} rejected: {res.get('error')}")
+            # 0b. Refresh the account row (deletion / autopilot toggle / ownership).
+            if (time.time() - last_account_refresh) >= ACCOUNT_REFRESH_SECONDS:
+                fresh, ok = bridge.fetch_trading_account(account_id, broker_server=broker_server)
+                last_account_refresh = time.time()
+                if ok:
+                    if fresh is None and account is not None:
+                        log("🛑 Trading account row was deleted in Supabase. Stopping worker.")
+                        break
+                    account = fresh
+                    user_id = account.get("user_id") if account else None
                 else:
-                    res = execute_market_order(order)
-                    if res.get("success"):
-                        bridge.update_order_status(oid, "FILLED", mt5_ticket=int(res["ticket"]), open_price=res.get("price"))
-                    else:
-                        bridge.update_order_status(oid, "REJECTED", error_message=res.get("error"))
+                    log("⚠️ Could not refresh trading account row; keeping last known state.")
+
+            # 0c. Fail orders stuck in PROCESSING (previous crash) — never re-execute them.
+            if (time.time() - last_stale_check) >= 60:
+                last_stale_check = time.time()
+                for stale in bridge.fail_stale_processing_orders(account_id, STALE_PROCESSING_MINUTES):
+                    log(f"⚠️ Order {stale.get('id')} was stuck in PROCESSING -> FAILED (verify on terminal)")
+
+            # 1. Execute pending orders (only once the account owner is known)
+            if user_id:
+                _execute_pending(bridge, account_id, user_id)
 
             # 2. Collect telemetry + reconcile FILLED orders against live positions
             tel = collect_telemetry()
-            live_map = {p["ticket"]: p for p in tel.get("open_positions", [])} if tel else {}
-            filled = bridge.list_open_positions(account_id)
-            for o in filled:
-                ticket = o.get("mt5_ticket")
-                if not ticket:
-                    continue
-                if int(ticket) in live_map:
-                    lp = live_map[int(ticket)]
-                    bridge.update_position_pnl(o["id"], lp["current_price"], lp["pnl"])
-                else:
-                    closed = get_closed_position_result(int(ticket))
-                    bridge.mark_order_closed(o["id"], closed.get("close_price") or 0.0, closed.get("net_profit") or 0.0)
-                    if closed.get("net_profit") is not None:
-                        bridge.insert_trade_history({
-                            "user_id": o.get("user_id") or user_id,
-                            "account_id": account_id,
-                            "mt5_ticket": int(ticket),
-                            "symbol": o.get("symbol", ""),
-                            "action": o.get("action", "BUY"),
-                            "volume": o.get("volume", 0.01),
-                            "open_price": o.get("open_price") or 0.0,
-                            "close_price": closed.get("close_price") or 0.0,
-                            "profit": closed.get("net_profit", 0.0),
-                            "net_pnl": closed.get("net_profit", 0.0),
-                            "open_time": o.get("executed_at") or o.get("created_at"),
-                            "close_time": closed.get("close_time") or datetime.now().isoformat(),
-                            "comment": o.get("comment", ""),
-                        })
-                    log(f"🏁 Reconciled order {o['id']} -> CLOSED (ticket #{ticket}, PnL {closed.get('net_profit')})")
+            if user_id:
+                _reconcile_positions(bridge, account_id, user_id, tel)
 
             # 3. Push telemetry
             if tel:
@@ -392,10 +491,13 @@ def run_bridge(args):
                     today_pnl=today_pnl,
                     today_pnl_percent=today_pct,
                     terminal_connected=True,
+                    broker_server=broker_server,
+                    floating_pnl=tel.get("floating_pnl"),
+                    margin_level=tel.get("margin_level"),
                 )
 
-            # 4. Auto-Pilot mirroring (conservative; opt-in via --autopilot)
-            if args.autopilot and account and account.get("autopilot_enabled"):
+            # 4. Auto-Pilot mirroring (conservative; opt-in via --autopilot AND the live row flag)
+            if args.autopilot and account and account.get("autopilot_enabled") and user_id:
                 _autopilot_pass(bridge, account_id, account, tel)
 
             if args.once:
@@ -416,30 +518,52 @@ def run_bridge(args):
 
 
 def _autopilot_pass(bridge: SupabaseBridge, account_id: str, account: dict, tel: dict):
-    """Mirrors active V2 signals onto the account, deduplicated by signal id in comment."""
+    """Mirrors fresh, unexpired V2 signals onto the account, deduplicated by signal id in comment."""
     user_id = account.get("user_id")
     fixed_lot = float(account.get("fixed_lot") or 0.01)
-    signals = bridge.get_active_signals(limit=5)
+    max_lot = float(account.get("max_lot") or fixed_lot)
+    volume = round(min(fixed_lot, max_lot), 2)
+    if volume <= 0:
+        return
+    max_open = int(account.get("max_open_trades") or 0)
+
+    signals = bridge.get_active_signals(limit=5, max_age_minutes=AUTOPILOT_MAX_SIGNAL_AGE_MINUTES)
     if not signals:
         return
 
-    existing_comments = {o.get("comment") for o in bridge.list_orders(account_id) if o.get("comment")}
+    orders = bridge.list_orders(account_id, user_id=user_id)
+    existing_comments = {o.get("comment") for o in orders if o.get("comment")}
+    open_count = sum(
+        1 for o in orders
+        if o.get("status") in ("PENDING", "PROCESSING", "FILLED") and str(o.get("action", "")).upper() in ("BUY", "SELL")
+    )
     for s in signals:
         sig_id = s.get("id")
-        comment = f"AUTO_{sig_id}"[:31]
-        if not sig_id or comment in existing_comments:
+        # Only generator-published signals (which always carry expires_at) are mirrored.
+        if not sig_id or sig_id in LEGACY_SEED_SIGNAL_IDS or not s.get("expires_at"):
             continue
-        bridge.create_order({
+        if str(s.get("action", "")).upper() not in ("BUY", "SELL"):
+            continue
+        comment = f"AUTO_{sig_id}"[:31]
+        if comment in existing_comments:
+            continue
+        if max_open and open_count >= max_open:
+            log(f"🤖 Auto-Pilot: max_open_trades ({max_open}) reached; not mirroring {sig_id}")
+            break
+        res = bridge.create_order({
             "user_id": user_id,
             "account_id": account_id,
+            "trading_account_id": account.get("id"),
             "symbol": s.get("symbol"),
             "action": s.get("action"),
-            "volume": fixed_lot,
+            "volume": volume,
             "sl": s.get("sl"),
             "tp": s.get("tp"),
             "comment": comment,
         })
-        log(f"🤖 Auto-Pilot queued signal {sig_id} ({s.get('action')} {s.get('symbol')})")
+        if res.get("success"):
+            log(f"🤖 Auto-Pilot queued signal {sig_id} ({s.get('action')} {s.get('symbol')})")
+            open_count += 1
         existing_comments.add(comment)
 
 
@@ -449,6 +573,7 @@ if __name__ == "__main__":
     parser.add_argument("--password", default=os.environ.get("MT5_PASSWORD"), help="MT5 Account Password")
     parser.add_argument("--server", default=os.environ.get("MT5_SERVER"), help="Broker Server Name (only for auto-login)")
     parser.add_argument("--terminal-path", default=os.environ.get("MT5_TERMINAL_PATH"), help="Path to terminal64.exe (optional)")
+    parser.add_argument("--portable", action="store_true", help="Launch the terminal in portable mode (data dir next to the exe)")
     parser.add_argument("--interval", type=float, default=2.0, help="Sync interval in seconds")
     parser.add_argument("--once", action="store_true", help="Execute a single sync and exit")
     parser.add_argument("--autopilot", action="store_true", help="Enable Auto-Pilot signal mirroring")

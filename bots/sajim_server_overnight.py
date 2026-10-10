@@ -35,6 +35,7 @@ for p in (ROOT_DIR, BASE_DIR, os.path.join(ROOT_DIR, "core"), os.path.join(ROOT_
 import MetaTrader5 as mt5
 from core.beep_signal_engine import BeepSignalEngine, BeepSignal
 from bots.sajim_v1_bot import SajimV1Bot
+from v2.safety import kill_switch_active
 
 # Configure Logging (Safe ASCII for Windows Console, UTF-8 for File)
 log_file = os.path.join(ROOT_DIR, "overnight_execution.log")
@@ -57,13 +58,8 @@ logger = logging.getLogger("SajimServer")
 
 
 # PILLAR 1: THE CLEAN PLATE PROTOCOL — TOXIC ASSET BLACKLIST
-# Excludes assets with proven structural whipsaws, excessive spread-to-ATR friction, or contract mismatches
-TOXIC_BLACKLIST = {
-    "XAUGBP.c", "XAGUSD.c", "XAUGBP", "XAGUSD",
-    "CADCHF", "CADCHF.c", "AUDCHF", "AUDCHF.c",
-    "NZDCHF", "NZDCHF.c", "AUDNZD", "AUDNZD.c",
-    "GBPCHF", "GBPCHF.c"
-}
+# Single source of truth: config/master_trading_whitelist.json (core/whitelist_manager.py).
+from bots.sajim_v1_bot import TOXIC_BLACKLIST, MAGIC_V1  # noqa: E402  (backward-compatible re-export)
 
 
 class SajimOvernightServer:
@@ -75,9 +71,10 @@ class SajimOvernightServer:
     def __init__(
         self,
         scan_interval_seconds: int = 30,
-        max_concurrent_positions: int = 8,
-        base_risk_fraction: float = 0.02,
+        max_concurrent_positions: int = 3,
+        base_risk_fraction: float = 0.01,
         dry_run: bool = False,
+        vip_extra_slots: int = 0,
     ):
         self.terminal_path = r"C:\Program Files\MetaTrader 5\terminal64.exe"
         self.scan_interval = scan_interval_seconds
@@ -88,6 +85,7 @@ class SajimOvernightServer:
         self.bot = SajimV1Bot(
             max_concurrent_positions=max_concurrent_positions,
             base_risk_fraction=base_risk_fraction,
+            vip_extra_slots=vip_extra_slots,
             dry_run=dry_run,
         )
         self.broadcasted_signal_ids = set()
@@ -138,11 +136,9 @@ class SajimOvernightServer:
         # Filter universe by empirical edge whitelist (Discarding 157 toxic bleeder setups)
         try:
             from config.v1_edge_filter import get_v1_approved_symbols
-            approved_set = set(get_v1_approved_symbols())
-            filtered_universe = [s for s in active_universe if s in approved_set]
-            if filtered_universe:
-                active_universe = filtered_universe
-                logger.info(f"[🛡️ V1 EDGE INTEGRATION] Universe filtered to {len(active_universe)} positive-expectancy assets.")
+            approved_set = {wl_mgr._clean_symbol(s) for s in get_v1_approved_symbols()}
+            active_universe = [s for s in active_universe if wl_mgr._clean_symbol(s) in approved_set]
+            logger.info(f"[🛡️ V1 EDGE INTEGRATION] Universe filtered to {len(active_universe)} master-whitelist V1 assets.")
         except Exception as e:
             logger.warning(f"Could not load v1_edge_filter: {e}")
 
@@ -153,7 +149,7 @@ class SajimOvernightServer:
 
     def write_status(self, active_signals: List[BeepSignal]):
         acc = mt5.account_info()
-        active_trades = [p._asdict() for p in (mt5.positions_get() or []) if p.magic == 777999]
+        active_trades = [p._asdict() for p in (mt5.positions_get() or []) if p.magic == MAGIC_V1]
         status = {
             "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "pipeline": "DATA -> BEEP -> SIGNAL -> SAJIM -> ENTRY -> MANAGEMENT -> PNL",
@@ -170,6 +166,7 @@ class SajimOvernightServer:
             "top_signals": [s.to_dict() for s in active_signals[:5]],
             "open_positions": active_trades,
             "mode": "DRY_RUN" if self.dry_run else "LIVE_EXECUTION",
+            "kill_switch_active": kill_switch_active(),
         }
         try:
             with open(status_file, "w", encoding="utf-8") as f:
@@ -241,10 +238,11 @@ class SajimOvernightServer:
             reverse=True
         )
         for sig in sorted_signals:
-            all_bot_pos = [p for p in (mt5.positions_get() or []) if p.magic == 777999]
+            all_bot_pos = [p for p in (mt5.positions_get() or []) if p.magic == MAGIC_V1]
             active_count = len(all_bot_pos)
-            is_gold_or_vip = sig.symbol in ("XAUUSD", "GBPUSD")
-            eff_max = max(10, self.bot.max_positions + 3) if is_gold_or_vip else self.bot.max_positions
+            # VIP extra slots are opt-in (vip_extra_slots, default 0)
+            is_gold_or_vip = sig.symbol.replace(".c", "") in ("XAUUSD", "GBPUSD")
+            eff_max = self.bot.max_positions + (self.bot.vip_extra_slots if is_gold_or_vip else 0)
 
             if active_count >= eff_max:
                 break
@@ -304,7 +302,7 @@ if __name__ == "__main__":
     parser.add_argument("--live", action="store_true", help="Execute real trades on MT5 server (default: Dry Run)")
     parser.add_argument("--interval", type=int, default=30, help="Scan interval in seconds (default: 30)")
     parser.add_argument("--risk", type=float, default=0.01, help="Base risk fraction per asset (default: 0.01 = 1.0%%)")
-    parser.add_argument("--max-positions", type=int, default=6, help="Max concurrent open positions (default: 6)")
+    parser.add_argument("--max-positions", type=int, default=3, help="Max concurrent open positions (default: 3)")
     args = parser.parse_args()
 
     server = SajimOvernightServer(

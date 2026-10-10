@@ -17,6 +17,14 @@ Prop Firm Hard Guardrails:
   6. Correlated Exposure Limit: Maximum 2 concurrent open positions across all pairs.
   7. Automated Trailing Break-Even: Locks risk-free at 1:1.5 R:R to protect daily equity.
   8. Sammy's 4-Check Gatekeeper: Pre-trade audit before any order reaches the bridge.
+
+Drawdown baselines:
+  - `--size` is the challenge's initial balance and the total-drawdown baseline (it is NOT
+    overwritten by the current balance on connect).
+  - peak equity (trailing drawdown) and the UTC start-of-day equity are persisted to
+    state/prop_firm_<login>.json so restarts do not reset the guardrails.
+  - Requires the private BEEP vault (vault_original_beep) for signal generation.
+  - --live sends real MT5 market orders (fresh tick price, SL/TP attached); default is dry run.
 ========================================================================================
 """
 
@@ -39,8 +47,14 @@ for p in (ROOT_DIR, os.path.join(ROOT_DIR, "core"), BOTS_DIR, PROP_DIR, os.path.
         sys.path.insert(0, p)
 
 import MetaTrader5 as mt5
-from vault_original_beep.raw_beep_equations import OriginalRawBeep
-from sajim_omniverse_bot import UniversalLotCalculator
+from core.lot_calculator import UniversalLotCalculator
+from v2.safety import STATE_DIR, new_entries_allowed, utc_day_start
+from v2.execution.mt5_exec import send_market_order
+
+try:
+    from vault_original_beep.raw_beep_equations import OriginalRawBeep  # private BEEP vault (git-ignored)
+except ImportError:  # pragma: no cover - depends on private modules
+    OriginalRawBeep = None
 
 
 class PropFirmRiskProfile:
@@ -48,11 +62,13 @@ class PropFirmRiskProfile:
     def __init__(
         self,
         account_size: float = 100000.0,
-        max_total_dd_pct: float = 5.0,    # Firm rule 8-10%, Sajim buffer 5.0%
+        max_total_dd_pct: float = 5.0,    # Firm rule 8-10%, Sajim buffer 5.0% (static, from initial balance)
         max_daily_dd_pct: float = 3.5,    # Firm rule 5.0%, Sajim buffer 3.5%
         risk_per_trade_pct: float = 0.50, # 0.50% risk per trade ($500 on $100k)
         max_open_positions: int = 2,
         min_rr_ratio: float = 3.0,
+        max_trailing_dd_pct: Optional[float] = None,  # trailing from peak equity (default = max_total_dd_pct)
+        state_file: Optional[str] = None,
     ):
         self.account_size = account_size
         self.max_total_dd_pct = max_total_dd_pct
@@ -60,32 +76,89 @@ class PropFirmRiskProfile:
         self.risk_per_trade_pct = risk_per_trade_pct
         self.max_open_positions = max_open_positions
         self.min_rr_ratio = min_rr_ratio
+        self.max_trailing_dd_pct = max_total_dd_pct if max_trailing_dd_pct is None else max_trailing_dd_pct
+        self.state_file = state_file
 
         # Dynamic Watermarks
         self.starting_daily_equity = account_size
         self.current_day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         self.peak_equity = account_size
+        self._load_state()
 
-    def check_daily_reset(self, current_equity: float):
+    # ----------------------------------------------------------- persistence
+    def _load_state(self) -> None:
+        if not self.state_file or not os.path.exists(self.state_file):
+            return
+        try:
+            with open(self.state_file, "r", encoding="utf-8") as f:
+                st = json.load(f)
+            if float(st.get("account_size", 0.0)) == float(self.account_size):
+                self.peak_equity = max(self.account_size, float(st.get("peak_equity", self.account_size)))
+                self.starting_daily_equity = float(st.get("starting_daily_equity", self.account_size))
+                # Keep the persisted day so a new UTC day triggers check_daily_reset()
+                self.current_day = st.get("current_day", self.current_day)
+            else:
+                logging.warning(
+                    f"[PROP GUARD] State file is for account size {st.get('account_size')}, not {self.account_size}; "
+                    f"starting fresh baselines."
+                )
+        except Exception as e:
+            logging.warning(f"[PROP GUARD] Could not read state {self.state_file}: {e}")
+
+    def save_state(self) -> None:
+        if not self.state_file:
+            return
+        try:
+            os.makedirs(os.path.dirname(self.state_file), exist_ok=True)
+            tmp = self.state_file + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump({
+                    "account_size": self.account_size,
+                    "peak_equity": self.peak_equity,
+                    "current_day": self.current_day,
+                    "starting_daily_equity": self.starting_daily_equity,
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                }, f, indent=2)
+            os.replace(tmp, self.state_file)
+        except Exception as e:
+            logging.warning(f"[PROP GUARD] Could not persist state {self.state_file}: {e}")
+
+    def check_daily_reset(self, current_equity: float, start_of_day_balance: Optional[float] = None):
         """Resets daily starting equity at 00:00 UTC."""
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         if today != self.current_day:
             self.current_day = today
-            self.starting_daily_equity = current_equity
-            logging.info(f"[PROP GUARD] Daily reset triggered for {today}. Baseline equity: ${current_equity:,.2f}")
+            # Baseline is the higher of current equity and the reconstructed start-of-day balance
+            self.starting_daily_equity = max(current_equity, start_of_day_balance or 0.0)
+            logging.info(f"[PROP GUARD] Daily reset triggered for {today}. Baseline equity: ${self.starting_daily_equity:,.2f}")
+            self.save_state()
 
-    def evaluate_gatekeeper(self, current_equity: float, open_positions_count: int) -> Tuple[bool, str]:
+    def evaluate_gatekeeper(
+        self,
+        current_equity: float,
+        open_positions_count: int,
+        start_of_day_balance: Optional[float] = None,
+    ) -> Tuple[bool, str]:
         """Sammy's 4-Check Gatekeeper tailored for Prop Firm preservation."""
-        self.check_daily_reset(current_equity)
+        self.check_daily_reset(current_equity, start_of_day_balance)
 
-        # Update high-water mark
+        # Update high-water mark (persisted)
         if current_equity > self.peak_equity:
             self.peak_equity = current_equity
+            self.save_state()
 
-        # 1. Total Drawdown Check
+        # 1. Total (static) Drawdown Check vs the challenge's initial balance (--size)
         total_dd = (self.account_size - current_equity) / self.account_size * 100.0
         if total_dd >= self.max_total_dd_pct:
             return False, f"CIRCUIT BREAKER: Total drawdown {total_dd:.2f}% >= {self.max_total_dd_pct}% limit"
+
+        # 1b. Trailing Drawdown from peak equity (measured in % of initial balance)
+        trailing_dd = (self.peak_equity - current_equity) / self.account_size * 100.0
+        if trailing_dd >= self.max_trailing_dd_pct:
+            return False, (
+                f"CIRCUIT BREAKER: Trailing drawdown {trailing_dd:.2f}% from peak ${self.peak_equity:,.2f} "
+                f">= {self.max_trailing_dd_pct}% limit"
+            )
 
         # 2. Daily Drawdown Check
         daily_loss = (self.starting_daily_equity - current_equity) / self.starting_daily_equity * 100.0
@@ -109,9 +182,15 @@ class PropFirmChallengeBot:
         magic_number: int = 770889,
         target_symbols: Optional[List[str]] = None,
     ):
+        if OriginalRawBeep is None:
+            raise ImportError(
+                "PropFirmChallengeBot requires the private BEEP vault module "
+                "vault_original_beep.raw_beep_equations (not in this repo)"
+            )
         self.dry_run = dry_run
         self.magic_number = magic_number
-        self.risk_manager = PropFirmRiskProfile(account_size=account_size)
+        self.account_size = float(account_size)
+        self.risk_manager = PropFirmRiskProfile(account_size=self.account_size)
         self.raw_beep = OriginalRawBeep()
 
         # Prime Liquid Institutional Assets for Prop Firms
@@ -136,9 +215,29 @@ class PropFirmChallengeBot:
             return False
         logging.info(f"[+] Connected to MT5 Account: {acc_info.login} ({acc_info.server})")
         logging.info(f"[+] Equity: ${acc_info.equity:,.2f} | Balance: ${acc_info.balance:,.2f}")
-        self.risk_manager.account_size = acc_info.balance
-        self.risk_manager.starting_daily_equity = acc_info.equity
+        logging.info(f"[+] Challenge baseline (--size): ${self.account_size:,.2f}")
+
+        # Keep --size as the drawdown baseline; restore persisted peak / daily baseline
+        state_file = os.path.join(STATE_DIR, f"prop_firm_{acc_info.login}.json")
+        self.risk_manager = PropFirmRiskProfile(account_size=self.account_size, state_file=state_file)
+        if not os.path.exists(state_file):
+            self.risk_manager.starting_daily_equity = max(acc_info.equity, self._start_of_day_balance(acc_info))
+            self.risk_manager.peak_equity = max(self.account_size, acc_info.equity)
+            self.risk_manager.save_state()
         return True
+
+    def _start_of_day_balance(self, acc_info) -> float:
+        """Balance at 00:00 UTC reconstructed from today's trading deals."""
+        try:
+            deals = mt5.history_deals_get(utc_day_start(), datetime.now(timezone.utc)) or []
+            realized = sum(
+                float(d.profit) + float(d.swap) + float(getattr(d, "commission", 0.0) or 0.0)
+                + float(getattr(d, "fee", 0.0) or 0.0)
+                for d in deals if getattr(d, "type", 0) in (0, 1)
+            )
+            return float(acc_info.balance) - realized
+        except Exception:
+            return float(acc_info.balance)
 
     def scan_for_institutional_edges(self) -> List[Dict[str, Any]]:
         """Scans candidate symbols for RARE (M(t) >= 60) BEEP signatures."""
@@ -204,8 +303,10 @@ class PropFirmChallengeBot:
         if not acc:
             return
 
-        positions = mt5.positions_get(magic=self.magic_number) or []
-        allowed, reason = self.risk_manager.evaluate_gatekeeper(acc.equity, len(positions))
+        positions = [p for p in (mt5.positions_get() or []) if p.magic == self.magic_number]
+        allowed, reason = self.risk_manager.evaluate_gatekeeper(
+            acc.equity, len(positions), start_of_day_balance=self._start_of_day_balance(acc)
+        )
 
         print(f"\n[{datetime.now().strftime('%H:%M:%S')}] --- PROP FIRM MONITOR ---")
         print(f"Equity: ${acc.equity:,.2f} | Daily Base: ${self.risk_manager.starting_daily_equity:,.2f}")
@@ -214,6 +315,9 @@ class PropFirmChallengeBot:
 
         if not allowed:
             print(f"[!] Trading locked: {reason}")
+            return
+        if not new_entries_allowed("PROPFIRM"):
+            print("[!] Trading locked: global kill switch engaged")
             return
 
         edges = self.scan_for_institutional_edges()
@@ -225,20 +329,41 @@ class PropFirmChallengeBot:
         print(f"[+] BEST PROP SETUP FOUND: {top_edge['symbol']} {top_edge['tf']} {top_edge['action']} "
               f"[{top_edge['layer']}] M(t)={top_edge['m_t']:.1f}")
 
-        lot, cash_at_risk, _ = UniversalLotCalculator.calculate_lot(
-            symbol=top_edge['symbol'],
-            equity=acc.equity,
-            risk_fraction=self.risk_manager.risk_per_trade_pct / 100.0,
-            entry_price=top_edge['entry'],
-            stop_price=top_edge['sl'],
-        )
-        print(f"[*] Computed Safe Challenge Lot: {lot:.2f} (Risking ${cash_at_risk:,.2f} = {self.risk_manager.risk_per_trade_pct:.2f}%)")
+        try:
+            lot, cash_at_risk, specs = UniversalLotCalculator.calculate_lot(
+                symbol=top_edge['symbol'],
+                equity=acc.equity,
+                risk_fraction=self.risk_manager.risk_per_trade_pct / 100.0,
+                entry_price=top_edge['entry'],
+                stop_price=top_edge['sl'],
+                account_currency=acc.currency,
+            )
+        except ValueError as e:
+            print(f"[!] Sizing failed: {e}")
+            return
+        if lot <= 0:
+            print(f"[!] Trade rejected by sizing: {specs.get('rejected')}")
+            return
+        print(f"[*] Computed Safe Challenge Lot: {lot} (Risking {cash_at_risk:,.2f} = {self.risk_manager.risk_per_trade_pct:.2f}%)")
 
+        ok, res, fill = send_market_order(
+            symbol=top_edge['symbol'],
+            action=top_edge['action'],
+            volume=float(lot),
+            sl=float(top_edge['sl']),
+            tp=float(top_edge['tp']),
+            magic=self.magic_number,
+            comment=f"Sajim_Prop_{top_edge['layer'][:8]}",
+            dry_run=self.dry_run,
+            bot_name="PROPFIRM",
+        )
         if self.dry_run:
-            print(f"[DRY RUN] Would execute: {top_edge['action']} {lot:.2f} {top_edge['symbol']} "
-                  f"Entry={top_edge['entry']:.4f} SL={top_edge['sl']:.4f} TP={top_edge['tp']:.4f}")
+            print(f"[DRY RUN] Would execute: {top_edge['action']} {lot} {top_edge['symbol']} "
+                  f"SL={top_edge['sl']:.4f} TP={top_edge['tp']:.4f} (no order sent)")
+        elif ok:
+            print(f"[LIVE PROP EXECUTION] Filled #{res.order} {top_edge['action']} {lot} {top_edge['symbol']} @ {fill}")
         else:
-            print("[LIVE PROP EXECUTION] Sending order to MT5 bridge...")
+            print("[!] LIVE PROP EXECUTION FAILED (see log).")
 
 
 def main():
@@ -249,7 +374,11 @@ def main():
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
-    bot = PropFirmChallengeBot(account_size=args.size, dry_run=not args.live)
+    try:
+        bot = PropFirmChallengeBot(account_size=args.size, dry_run=not args.live)
+    except ImportError as e:
+        print(f"[!] {e}")
+        sys.exit(1)
     if bot.connect():
         bot.run_single_iteration()
 

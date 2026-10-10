@@ -42,7 +42,9 @@ from v2.coexistence import CoexistenceGatekeeper, MAGIC_V2
 # Sub-module imports
 from v2.risk.hummingbird import HummingbirdEvaluator
 from v2.risk.ratchet import V2PositionRiskManager
-from v2.execution.order_router import V2OrderRouter
+from v2.execution.order_router import V2OrderRouter, DEFAULT_BASE_RISK, DEFAULT_MAX_RISK, DEFAULT_STREAK_RATE
+from v2.risk.position_state import get_position_store
+from core.mt5_login import ensure_account
 
 logger = logging.getLogger("SajimV2DualBot")
 
@@ -66,9 +68,9 @@ class SajimV2DualBot:
     def __init__(
         self,
         gatekeeper: Optional[CoexistenceGatekeeper] = None,
-        base_risk_fraction: float = 0.05,
-        max_risk_fraction: float = 0.08,
-        streak_expansion_rate: float = 0.25,
+        base_risk_fraction: float = DEFAULT_BASE_RISK,     # 1% base risk per trade
+        max_risk_fraction: float = DEFAULT_MAX_RISK,       # 2% hard cap
+        streak_expansion_rate: float = DEFAULT_STREAK_RATE,  # +10% per win, capped at max_risk
         hummingbird_harvest_enabled: bool = True,
         hummingbird_harvest_mode: str = "FULL",
         hummingbird_partial_ratio: float = 0.80,
@@ -77,12 +79,15 @@ class SajimV2DualBot:
         min_snipe_score: float = 55.0,
         min_snipe_rvol: float = 1.20,
         dry_run: bool = False,
+        broker: str = "mt5",
     ):
         self.terminal_path = r"C:\Program Files\MetaTrader 5\terminal64.exe"
         self.base_risk = base_risk_fraction
         self.max_risk = max_risk_fraction
         self.streak_rate = streak_expansion_rate
         self.dry_run = dry_run
+        self.broker = (broker or "mt5").lower()
+        self.position_store = get_position_store("v2")
 
         self.gatekeeper = gatekeeper or CoexistenceGatekeeper()
         self.bus = BeepBroadcastBus()
@@ -125,6 +130,7 @@ class SajimV2DualBot:
             hummingbird_partial_ratio=hummingbird_partial_ratio,
             kinetic_exit_enabled=kinetic_exit_enabled,
             dry_run=self.dry_run,
+            position_store=self.position_store,
         )
 
         self.order_router = V2OrderRouter(
@@ -133,6 +139,8 @@ class SajimV2DualBot:
             max_risk=self.max_risk,
             streak_rate=self.streak_rate,
             dry_run=self.dry_run,
+            broker=self.broker,
+            position_store=self.position_store,
         )
 
     def register_cartridge(self, cartridge: BaseStrategyCartridge) -> None:
@@ -147,32 +155,11 @@ class SajimV2DualBot:
                 logger.error(f"Cannot initialize MT5: {mt5.last_error()}")
                 return False
 
-        cfg_path = os.path.join(ROOT_DIR, "config", "broker_config.json")
-        broker_cfg = {}
-        if os.path.exists(cfg_path):
-            try:
-                with open(cfg_path, "r", encoding="utf-8") as f:
-                    broker_cfg = json.load(f)
-            except Exception:
-                pass
-
-        if target_account is None:
-            target_account = broker_cfg.get("active_account")
-
-        acc = mt5.account_info()
-        if target_account is not None and (not acc or acc.login != target_account):
-            pwd = broker_cfg.get("password") if target_account == broker_cfg.get("active_account") else None
-            server_name = broker_cfg.get("server") if target_account == broker_cfg.get("active_account") else "Headway-Real"
-            if pwd and server_name:
-                mt5.login(login=target_account, password=pwd, server=server_name)
-            acc = mt5.account_info()
-
+        # Explicit target, else MT5_LOGIN env, else config/broker_config.json active_account.
+        # No hard-coded server / account fallbacks.
+        acc = ensure_account(mt5, target_account, logger=logger)
         if not acc:
-            logger.error("No active MT5 account found.")
-            return False
-
-        if target_account is not None and acc.login != target_account:
-            logger.critical(f"[SECURITY LOCK] Connected to {acc.login} ({acc.server}), expected {target_account}. Aborting.")
+            logger.error("No active MT5 account found (or wrong account). Aborting.")
             mt5.shutdown()
             return False
 

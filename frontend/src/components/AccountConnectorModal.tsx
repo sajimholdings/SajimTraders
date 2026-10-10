@@ -4,7 +4,7 @@ import React, { useState, useEffect } from "react";
 import { X, ArrowRight, Zap } from "lucide-react";
 import { api } from "../lib/api";
 import { trackAction } from "../lib/logger";
-import { AFFILIATE_URL, DEMO_ACCOUNT_ID, DEMO_PASSWORD } from "../lib/constants";
+import { AFFILIATE_URL } from "../lib/constants";
 import type { AccountTelemetry, ConnectorTab } from "../lib/types";
 
 interface AccountConnectorModalProps {
@@ -37,9 +37,10 @@ export const AccountConnectorModal: React.FC<AccountConnectorModalProps> = ({
     setTab(next);
     setErrorMsg("");
     if (next === "demo") {
+      // The demo cockpit is fully client-side: no broker credentials are used.
       setServer("Headway-Demo");
-      setLogin(DEMO_ACCOUNT_ID);
-      setPassword(DEMO_PASSWORD);
+      setLogin("");
+      setPassword("");
     } else {
       setServer(currentServer && currentServer !== "None" ? currentServer : "Headway-Real");
       setLogin(
@@ -84,7 +85,7 @@ export const AccountConnectorModal: React.FC<AccountConnectorModalProps> = ({
     setLoading(false);
 
     if (res.ok && res.data.success) {
-      trackAction("MT5_ACCOUNT_CONNECTED", { broker: server, id: login });
+      trackAction("MT5_ACCOUNT_CONNECTED", { broker: server });
       onConnectSuccess(
         res.data.account
           ? { ...res.data.account, is_demo: false }
@@ -92,7 +93,17 @@ export const AccountConnectorModal: React.FC<AccountConnectorModalProps> = ({
       );
       onClose();
     } else {
-      setErrorMsg(res.ok ? res.data.error || "Failed to verify broker login." : res.error);
+      if (res.ok) {
+        setErrorMsg(res.data.error || "Failed to verify broker login.");
+      } else if (res.status === 409) {
+        setErrorMsg("This MT5 account is already linked to another Sajim Traders user.");
+      } else if (res.status === 503) {
+        setErrorMsg("Account linking is temporarily unavailable (server configuration). Please try again later.");
+      } else if (res.status === 401) {
+        setErrorMsg("Please sign in before connecting a real MT5 account.");
+      } else {
+        setErrorMsg(res.error);
+      }
     }
   };
 
@@ -185,9 +196,10 @@ export const AccountConnectorModal: React.FC<AccountConnectorModalProps> = ({
               type="number"
               value={login}
               onChange={(e) => setLogin(e.target.value)}
-              placeholder="e.g. 17537803"
-              required
-              className="w-full bg-black/60 border border-white/[0.08] rounded-xl px-3 py-2.5 text-xs font-mono text-white placeholder-gray-600 focus:outline-none focus:border-green-500 transition-colors"
+              placeholder={tab === "demo" ? "Not needed for demo" : "e.g. 17537803"}
+              required={tab === "real"}
+              disabled={tab === "demo"}
+              className="w-full bg-black/60 border border-white/[0.08] rounded-xl px-3 py-2.5 text-xs font-mono text-white placeholder-gray-600 focus:outline-none focus:border-green-500 transition-colors disabled:opacity-50"
             />
           </div>
 
@@ -197,9 +209,10 @@ export const AccountConnectorModal: React.FC<AccountConnectorModalProps> = ({
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="••••••••••••"
-              required
-              className="w-full bg-black/60 border border-white/[0.08] rounded-xl px-3 py-2.5 text-xs font-mono text-white placeholder-gray-600 focus:outline-none focus:border-green-500 transition-colors"
+              placeholder={tab === "demo" ? "Not needed for demo" : "••••••••••••"}
+              required={tab === "real"}
+              disabled={tab === "demo"}
+              className="w-full bg-black/60 border border-white/[0.08] rounded-xl px-3 py-2.5 text-xs font-mono text-white placeholder-gray-600 focus:outline-none focus:border-green-500 transition-colors disabled:opacity-50"
             />
           </div>
 

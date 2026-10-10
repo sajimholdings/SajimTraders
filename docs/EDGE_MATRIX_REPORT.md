@@ -1,3 +1,12 @@
+> **⚠️ RESULTS INVALIDATED — REGENERATE BEFORE USE (added during code audit).**
+> This report and `docs/edge_matrix_results.json` were produced by a version of
+> `scripts/run_edge_matrix_backtest.py` with an intrabar look-ahead bias: the stop loss was
+> ratcheted using a bar's HIGH and then tested against the SAME bar's LOW, so trades that would
+> have been stopped out were often booked as break-even/locked wins. All tiers were also selected
+> in-sample with no out-of-sample validation. Regenerate with the fixed script
+> (`python scripts/run_edge_matrix_backtest.py --oos-split 0.3`) and only trust fronts whose
+> out-of-sample metrics confirm the edge. Numbers below are kept for reference only.
+
 # SAJIM HOLDINGS — QUANTITATIVE EDGE VERIFICATION REPORT
 ### Empirical Mathematical Edge & Blacklist Audit across All Pairs and Timeframes
 **Chief Quantitative Architect:** Jimmy Mathu  

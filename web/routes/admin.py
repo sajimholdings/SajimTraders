@@ -44,45 +44,49 @@ class AdminRoutesMixin:
         concurrency = coexist.get("concurrency", {})
         circuit = coexist.get("circuit_breaker", {"active": False, "reason": ""})
 
-        balance = acc_coexist.get("balance") or overnight.get("balance", 99.0)
-        equity = acc_coexist.get("equity") or overnight.get("equity", 94.04)
-        free_margin = acc_coexist.get("free_margin") or overnight.get("free_margin", 79.31)
-        margin_level = acc_coexist.get("margin_level_pct", 0.0)
-        currency = acc_coexist.get("currency", "USC")
+        # Real telemetry only: missing values are reported as None, never fabricated.
+        balance = acc_coexist.get("balance", overnight.get("balance"))
+        equity = acc_coexist.get("equity", overnight.get("equity"))
+        free_margin = acc_coexist.get("free_margin", overnight.get("free_margin"))
+        margin_level = acc_coexist.get("margin_level_pct")
+        currency = acc_coexist.get("currency", overnight.get("currency"))
 
-        balance_usd = round(balance / 100.0, 2) if currency == "USC" else balance
-        equity_usd = round(equity / 100.0, 2) if currency == "USC" else equity
+        def _to_usd(val):
+            if val is None:
+                return None
+            return round(float(val) / 100.0, 2) if currency == "USC" else val
 
+        has_telemetry = bool(coexist or overnight)
         data = {
             "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "system_online": True,
+            "system_online": has_telemetry,
             "broker": {
-                "server": overnight.get("server", "JustMarkets-Demo3"),
-                "account": overnight.get("account", 1200442972),
-                "terminal_bridge": "CONNECTED",
+                "server": overnight.get("server"),
+                "account": overnight.get("account"),
+                "terminal_bridge": "CONNECTED" if has_telemetry else "NO_DATA",
             },
             "session": overnight.get("session") or get_market_session(),
             "account": {
                 "balance_usc": balance,
-                "balance_usd": balance_usd,
+                "balance_usd": _to_usd(balance),
                 "equity_usc": equity,
-                "equity_usd": equity_usd,
+                "equity_usd": _to_usd(equity),
                 "free_margin": free_margin,
                 "margin_level_pct": margin_level,
                 "currency": currency,
             },
             "pnl": {
-                "today_closed": pnl_coexist.get("today_closed", 0.0),
-                "today_floating": pnl_coexist.get("today_floating", -0.59),
-                "combined_daily_net": pnl_coexist.get("combined_daily_net", -0.59),
+                "today_closed": pnl_coexist.get("today_closed"),
+                "today_floating": pnl_coexist.get("today_floating"),
+                "combined_daily_net": pnl_coexist.get("combined_daily_net"),
             },
             "concurrency": {
-                "total_open": concurrency.get("total_open", overnight.get("active_bot_positions", 5)),
-                "max_combined": concurrency.get("max_combined", 12),
-                "v1_count": concurrency.get("v1_count", 5),
-                "v2_count": concurrency.get("v2_count", 0),
-                "max_v1": 6,
-                "max_v2": 6,
+                "total_open": concurrency.get("total_open", overnight.get("active_bot_positions")),
+                "max_combined": concurrency.get("max_combined"),
+                "v1_count": concurrency.get("v1_count"),
+                "v2_count": concurrency.get("v2_count"),
+                "max_v1": concurrency.get("max_v1"),
+                "max_v2": concurrency.get("max_v2"),
             },
             "circuit_breaker": circuit,
             "toggles": coexist.get("toggles", {"v1_enabled": True, "v2_enabled": True}),
@@ -179,8 +183,8 @@ class AdminRoutesMixin:
         edge_data = load_json_safe(EDGE_FILTER_FILE, {})
         matrix_status = load_json_safe(EDGE_MATRIX_STATUS_FILE, {})
         self._send_json({
-            "audit_date": edge_data.get("audit_date", "2026-09-09"),
-            "audit_version": edge_data.get("audit_version", "1.0-EMPIRICAL-MT5"),
+            "audit_date": edge_data.get("audit_date"),
+            "audit_version": edge_data.get("audit_version"),
             "top_edges": edge_data.get("top_institutional_edges", matrix_status.get("top_edge_pairs", [])),
             "toxic_bleeders": edge_data.get("toxic_bleeders_summary", {}),
             "worst_bleeders": matrix_status.get("worst_bleeders", []),
@@ -206,14 +210,14 @@ class AdminRoutesMixin:
             "brand": "Sajim Traders",
             "tagline": "Scale-Invariant Institutional Quantitative Systems & Autonomous Execution",
             "lead_architect": "Jimmy Mathu",
+            # Only measured stats from the edge-matrix audit file; None when not available.
             "stats": {
-                "rare_layer_winrate": "92.6%",
-                "certified_layer_winrate": "87.1%",
-                "backtested_fronts": matrix_status.get("total_completed_fronts", 204),
-                "top_profit_factor": 1.99,
-                "top_pair": "USDCAD (M15)",
+                "rare_layer_winrate": matrix_status.get("rare_layer_winrate"),
+                "certified_layer_winrate": matrix_status.get("certified_layer_winrate"),
+                "backtested_fronts": matrix_status.get("total_completed_fronts"),
+                "top_profit_factor": matrix_status.get("top_profit_factor"),
+                "top_pair": matrix_status.get("top_pair"),
                 "target_rr": "1:3.5",
-                "flips_target": "3 Trades ($4 -> $10+ USC Compounding)"
             },
             "community": {
                 "channel_username": "@sajimtraders",
@@ -257,7 +261,9 @@ class AdminRoutesMixin:
         })
 
     def handle_toggles(self, body: dict):
-        """Updates bot operational toggles in memory or state."""
+        """Updates bot operational toggles in memory or state (admin key required)."""
+        if not self._require_admin_key():
+            return
         coexist = load_json_safe(COEXISTENCE_STATUS_FILE, {})
         current_toggles = coexist.get("toggles", {"v1_enabled": True, "v2_enabled": True})
 

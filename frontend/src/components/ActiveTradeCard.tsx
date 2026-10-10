@@ -2,7 +2,7 @@ import React from "react";
 import { X, ShieldCheck, Radio, ArrowUpRight, ArrowDownRight } from "lucide-react";
 import type { ClientTrade } from "../lib/types";
 import { SymbolIcon } from "./SymbolIcon";
-import { formatSignedCurrency } from "../lib/format";
+import { formatPrice, formatSignedCurrency } from "../lib/format";
 
 interface ActiveTradeCardProps {
   trades?: ClientTrade[];
@@ -83,7 +83,7 @@ export const ActiveTradeCard: React.FC<ActiveTradeCardProps> = ({
 
                     <div className="flex items-center gap-2 mt-0.5 text-xs text-gray-500 font-mono">
                       <span>
-                        Entry: {typeof t.open_price === "number" ? t.open_price.toFixed(2) : t.open_price}
+                        Entry: {formatPrice(t.open_price, t.symbol)}
                       </span>
                       {hasShield && (
                         <span className="inline-flex items-center gap-1 text-[10px] text-green-400 font-bold bg-green-500/10 px-1.5 py-0.2 rounded border border-green-500/20">
@@ -104,7 +104,7 @@ export const ActiveTradeCard: React.FC<ActiveTradeCardProps> = ({
                       {formatSignedCurrency(typeof t.pnl === "number" ? t.pnl : 0)}
                     </strong>
                     <span className="block text-[10px] text-gray-500 font-mono">
-                      Now: {typeof t.current_price === "number" ? t.current_price.toFixed(2) : t.current_price}
+                      Now: {formatPrice(t.current_price, t.symbol)}
                     </span>
                   </div>
 
