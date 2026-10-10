@@ -13,6 +13,16 @@ Mission:
       * Sajim V2 Young Surge    -> label: "SAJIM_V2_SURGE"
       * Sajim V2 Mean Reversion -> label: "SAJIM_V2_REVERT"
   - Provides institutional telemetry, SL/TP management, and Hummingbird peak harvesting.
+
+IMPLEMENTATION STATUS (read before relying on this module):
+  - The cTrader Open API protobuf protocol (ProtoOAApplicationAuthReq / AccountAuthReq,
+    order and execution events) is NOT implemented yet.
+  - In real mode, connect() therefore returns False and send_order() returns
+    success=False ("cTrader Open API execution not implemented"). No fake fills, no fake
+    balances: balance/equity are None and is_connected is False.
+  - An explicit SIMULATION mode exists for offline testing (CTraderBridge(simulation=True)
+    or CTRADER_SIMULATION=1). Every simulated result carries simulated=True and status
+    "SIMULATED"; it must never be presented as a broker fill.
 ========================================================================================
 """
 
@@ -65,18 +75,21 @@ DEFAULT_SYMBOL_MAP = {
 }
 
 
+NOT_IMPLEMENTED_MSG = "cTrader Open API execution not implemented"
+
+
 class CTraderBridge:
     """
-    Institutional Headless cTrader Open API Bridge.
-    Pure Python, Async-capable, Multi-Bot Isolated, Cloud-Ready.
+    Headless cTrader Open API bridge (connection skeleton) with an explicit,
+    clearly-flagged simulation mode. See module docstring for implementation status.
     """
 
     _instance = None
 
     @classmethod
-    def get_instance(cls):
+    def get_instance(cls, **kwargs):
         if cls._instance is None:
-            cls._instance = cls()
+            cls._instance = cls(**kwargs)
         return cls._instance
 
     def __init__(
@@ -85,15 +98,21 @@ class CTraderBridge:
         client_secret: Optional[str] = None,
         access_token: Optional[str] = None,
         account_id: Optional[str] = None,
-        environment: str = "demo",
+        environment: Optional[str] = None,
         dry_run: bool = False,
+        simulation: Optional[bool] = None,
+        simulation_balance: float = 10000.0,
     ):
         self.client_id = client_id or os.getenv("CTRADER_CLIENT_ID", "")
         self.client_secret = client_secret or os.getenv("CTRADER_CLIENT_SECRET", "")
         self.access_token = access_token or os.getenv("CTRADER_ACCESS_TOKEN", "")
         self.account_id = str(account_id or os.getenv("CTRADER_ACCOUNT_ID", ""))
-        self.environment = (environment or os.getenv("CTRADER_ENVIRONMENT", "demo")).lower()
+        self.environment = (environment or os.getenv("CTRADER_ENVIRONMENT", "demo") or "demo").lower()
         self.dry_run = dry_run
+
+        if simulation is None:
+            simulation = os.getenv("CTRADER_SIMULATION", "").strip().lower() in ("1", "true", "yes", "on")
+        self.simulation_mode = bool(simulation)
 
         self.host = CTRADER_HOST_LIVE if self.environment == "live" else CTRADER_HOST_DEMO
         self.port = CTRADER_PORT_SSL
@@ -101,49 +120,55 @@ class CTraderBridge:
         # Connection & Threading State
         self.is_connected = False
         self.is_authenticated = False
+        self.last_error: str = ""
         self.socket: Optional[ssl.SSLSocket] = None
-        self._rx_thread: Optional[threading.Thread] = None
-        self._heartbeat_thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
         self._lock = threading.Lock()
 
         # In-Memory Cache for Market Data & Portfolio State
         self.symbol_map: Dict[str, int] = dict(DEFAULT_SYMBOL_MAP)
         self.reverse_symbol_map: Dict[int, str] = {v: k for k, v in DEFAULT_SYMBOL_MAP.items()}
-        self.spot_prices: Dict[str, Dict[str, float]] = {}  # symbol -> {'bid': x, 'ask': y, 'time': ts}
-        self.open_positions: Dict[int, Dict[str, Any]] = {} # position_id -> position dict
+        self.spot_prices: Dict[str, Dict[str, float]] = {}  # symbol -> {'bid': x, 'ask': y, ...}
+        self.open_positions: Dict[int, Dict[str, Any]] = {}  # position_id -> position dict
         self.closed_deals: List[Dict[str, Any]] = []
+        self._sim_ticket_seq = int(time.time()) % 10000000 * 10  # unique simulated ticket ids
 
-        # Account Financial State
-        self.account_info = {
-            "account_id": self.account_id or "DEMO-SAJIM-001",
-            "balance": 10000.0,
-            "equity": 10000.0,
-            "free_margin": 10000.0,
-            "margin_level_pct": 1000.0,
-            "currency": "USD",
-            "leverage": 100,
-            "broker": "cTrader Spotware Cloud",
+        # Account Financial State: unknown until a real account state is reconciled
+        self.account_info: Dict[str, Any] = {
+            "account_id": self.account_id or None,
+            "balance": None,
+            "equity": None,
+            "free_margin": None,
+            "margin_level_pct": None,
+            "currency": None,
+            "leverage": None,
+            "broker": "cTrader Spotware Open API",
             "environment": self.environment.upper(),
-            "mode": "HEADLESS_PURE_PYTHON",
+            "mode": "SIMULATION" if self.simulation_mode else "HEADLESS_PURE_PYTHON",
         }
 
-        # Simulated state fallback if credentials not yet configured in .env
-        self.simulation_mode = not bool(self.client_id and self.access_token and self.account_id)
         if self.simulation_mode:
-            logger.info(
-                "[cTrader Bridge] Operating in SANDBOX / SIMULATION mode. "
-                "Set CTRADER_CLIENT_ID, CTRADER_CLIENT_SECRET, CTRADER_ACCESS_TOKEN, "
-                "and CTRADER_ACCOUNT_ID in .env to connect to live cTrader Open API."
+            logger.warning(
+                "[cTrader Bridge] EXPLICIT SIMULATION MODE: all fills, balances and P&L are simulated "
+                "(simulated=True). Nothing is sent to a broker."
             )
+            self.account_info.update({
+                "account_id": self.account_id or "SIMULATED",
+                "balance": float(simulation_balance),
+                "equity": float(simulation_balance),
+                "free_margin": float(simulation_balance),
+                "margin_level_pct": None,
+                "currency": "USD",
+            })
             self._init_sandbox_market_data()
 
     def _init_sandbox_market_data(self):
-        """Initializes realistic market rates for sandbox testing."""
+        """Static sample quotes used ONLY in explicit simulation mode."""
         self.spot_prices = {
             "XAUUSD": {"bid": 2685.40, "ask": 2685.65, "spread": 0.25, "point": 0.01, "digits": 2},
             "EURJPY": {"bid": 162.350, "ask": 162.365, "spread": 0.015, "point": 0.001, "digits": 3},
             "GBPJPY": {"bid": 194.200, "ask": 194.225, "spread": 0.025, "point": 0.001, "digits": 3},
+            "USDJPY": {"bid": 150.000, "ask": 150.012, "spread": 0.012, "point": 0.001, "digits": 3},
             "USDCAD": {"bid": 1.39200, "ask": 1.39215, "spread": 0.00015, "point": 0.00001, "digits": 5},
             "EURUSD": {"bid": 1.08500, "ask": 1.08512, "spread": 0.00012, "point": 0.00001, "digits": 5},
         }
@@ -153,80 +178,59 @@ class CTraderBridge:
     # ---------------------------------------------------------------------------
     def connect(self) -> bool:
         """
-        Initializes connection to cTrader Open API endpoint.
-        Returns True if connected and authenticated, or in verified sandbox mode.
+        Connects and authenticates. Returns True only when actually authenticated
+        (or when explicit simulation mode was requested). Any failure returns False.
         """
         if self.simulation_mode:
             self.is_connected = True
             self.is_authenticated = True
-            logger.info(
-                f"[cTrader Bridge] Sandboxed Cloud Connection Verified! "
-                f"Account: {self.account_info['account_id']} | "
-                f"Balance: ${self.account_info['balance']:,.2f} {self.account_info['currency']}"
+            logger.warning(
+                f"[cTrader Bridge] SIMULATED connection (no broker). "
+                f"Simulated balance: {self.account_info['balance']:,.2f} {self.account_info['currency']}"
             )
             return True
 
-        logger.info(f"Connecting to cTrader Open API: {self.host}:{self.port} (SSL)...")
+        if not (self.client_id and self.client_secret and self.access_token and self.account_id):
+            self.last_error = (
+                "Missing cTrader credentials: set CTRADER_CLIENT_ID, CTRADER_CLIENT_SECRET, "
+                "CTRADER_ACCESS_TOKEN and CTRADER_ACCOUNT_ID."
+            )
+            logger.error(f"[cTrader Bridge] {self.last_error}")
+            return False
+
+        logger.info(f"Connecting to cTrader Open API: {self.host}:{self.port} (SSL, {self.environment})...")
         try:
             raw_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             raw_socket.settimeout(15.0)
             context = ssl.create_default_context()
             self.socket = context.wrap_socket(raw_socket, server_hostname=self.host)
             self.socket.connect((self.host, self.port))
-            self.is_connected = True
-
-            # Start RX and Heartbeat daemons
-            self._stop_event.clear()
-            self._rx_thread = threading.Thread(target=self._rx_worker, daemon=True)
-            self._rx_thread.start()
-
-            self._heartbeat_thread = threading.Thread(target=self._heartbeat_worker, daemon=True)
-            self._heartbeat_thread.start()
-
-            # Perform Application & Account Authentication
-            auth_ok = self._authenticate_session()
-            if auth_ok:
-                self.is_authenticated = True
-                logger.info(f"[cTrader Bridge] Authenticated successfully for CTID Account {self.account_id}!")
-                self._reconcile_account_state()
-                return True
-            else:
-                logger.error("[cTrader Bridge] Authentication handshake failed. Falling back to sandbox.")
-                self.simulation_mode = True
-                return True
-
         except Exception as e:
-            logger.error(f"[cTrader Bridge] Connection error: {e}. Defaulting to sandbox mode.")
-            self.simulation_mode = True
-            self.is_connected = True
-            self.is_authenticated = True
-            return True
+            self.last_error = f"Connection error: {e}"
+            logger.error(f"[cTrader Bridge] {self.last_error}")
+            self.disconnect()
+            return False
 
-    def _authenticate_session(self) -> bool:
-        """Sends ProtoOAApplicationAuthReq and ProtoOAAccountAuthReq."""
-        logger.info(f"Sending App Auth (Client ID: {self.client_id[:6]}***)...")
-        time.sleep(0.5)
-        logger.info(f"Sending Account Auth (CTID: {self.account_id})...")
-        time.sleep(0.5)
+        if not self._authenticate_session():
+            logger.error(f"[cTrader Bridge] Authentication failed: {self.last_error}")
+            self.disconnect()
+            return False
+
+        self.is_connected = True
+        self.is_authenticated = True
+        if not self._reconcile_account_state():
+            logger.error(f"[cTrader Bridge] Account reconciliation failed: {self.last_error}")
+            self.disconnect()
+            return False
         return True
 
-    def _heartbeat_worker(self):
-        """Sends ProtoHeartbeatEvent every 10 seconds to maintain persistent connection."""
-        while not self._stop_event.is_set():
-            time.sleep(10.0)
-            if self.is_connected and not self.simulation_mode:
-                try:
-                    pass
-                except Exception:
-                    pass
-
-    def _rx_worker(self):
-        """Worker thread that receives and dispatches cTrader protobuf messages."""
-        while not self._stop_event.is_set():
-            try:
-                time.sleep(0.1)
-            except Exception:
-                break
+    def _authenticate_session(self) -> bool:
+        """
+        ProtoOAApplicationAuthReq + ProtoOAAccountAuthReq.
+        Not implemented: returns False rather than pretending to authenticate.
+        """
+        self.last_error = "cTrader Open API authentication (protobuf) not implemented"
+        return False
 
     def disconnect(self):
         """Gracefully shuts down connection."""
@@ -236,9 +240,10 @@ class CTraderBridge:
                 self.socket.close()
             except Exception:
                 pass
+            self.socket = None
         self.is_connected = False
         self.is_authenticated = False
-        logger.info("[cTrader Bridge] Disconnected from server.")
+        logger.info("[cTrader Bridge] Disconnected.")
 
     # ---------------------------------------------------------------------------
     # Market Data & Rates
@@ -250,30 +255,18 @@ class CTraderBridge:
         count: int = 50,
     ) -> List[float]:
         """
-        Fetches historical closing prices for indicators (HMA, BEEP, ATR).
-        Clean drop-in replacement for MT5 copy_rates_from_pos.
+        Historical closes for indicators. Not implemented for the real API (returns []);
+        never fabricates price series.
         """
-        clean_symbol = symbol.replace(".c", "").upper()
-        base_price = self.spot_prices.get(clean_symbol, {}).get("bid", 2685.40)
+        logger.error(f"[cTrader Bridge] fetch_live_rates({symbol}, {timeframe}) not implemented; returning no data.")
+        return []
 
-        rates = []
-        curr = base_price
-        for i in range(count):
-            drift = (i % 5 - 2) * 0.15
-            curr += drift
-            rates.append(round(curr, 2 if "XAU" in clean_symbol else 4))
-        return rates
-
-    def get_symbol_info(self, symbol: str) -> Dict[str, Any]:
-        """Returns tick specifications for sizing and spread checks."""
+    def get_symbol_info(self, symbol: str) -> Optional[Dict[str, Any]]:
+        """Tick specifications; None when unknown (no invented specs)."""
         clean_sym = symbol.replace(".c", "").upper()
-        spec = self.spot_prices.get(clean_sym, {
-            "bid": 2685.40,
-            "ask": 2685.65,
-            "spread": 0.25,
-            "point": 0.01,
-            "digits": 2,
-        })
+        spec = self.spot_prices.get(clean_sym)
+        if not spec:
+            return None
         return {
             "symbol": symbol,
             "bid": spec["bid"],
@@ -282,6 +275,7 @@ class CTraderBridge:
             "point": spec["point"],
             "digits": spec["digits"],
             "trade_contract_size": 100.0 if "XAU" in clean_sym else 100000.0,
+            "simulated": self.simulation_mode,
         }
 
     # ---------------------------------------------------------------------------
@@ -300,13 +294,21 @@ class CTraderBridge:
     ) -> Dict[str, Any]:
         """
         Sends order with label and comment for multi-bot attribution.
-        Equivalent to MT5 order_send with Magic Number.
+        Real mode: NOT implemented -> success=False. Simulation: simulated fill, flagged.
         """
-        clean_symbol = symbol.replace(".c", "").upper()
-        sym_info = self.get_symbol_info(clean_symbol)
-        fill_price = sym_info["ask"] if action.upper() == "BUY" else sym_info["bid"]
+        if not self.simulation_mode:
+            logger.error(f"[cTrader Bridge] {NOT_IMPLEMENTED_MSG}: {action} {volume} {symbol} NOT sent.")
+            return {"success": False, "error": NOT_IMPLEMENTED_MSG, "status": "NOT_IMPLEMENTED",
+                    "simulated": False, "label": label}
 
-        ticket = int(time.time() * 1000) % 100000000
+        sym_info = self.get_symbol_info(symbol)
+        if not sym_info:
+            return {"success": False, "error": f"No simulated quote for {symbol}", "status": "REJECTED",
+                    "simulated": True, "label": label}
+        fill_price = sym_info["ask"] if action.upper() == "BUY" else sym_info["bid"]
+        with self._lock:
+            self._sim_ticket_seq += 1
+            ticket = self._sim_ticket_seq
 
         position = {
             "ticket": ticket,
@@ -317,33 +319,37 @@ class CTraderBridge:
             "entry_price": float(fill_price),
             "sl": float(sl),
             "tp": float(tp),
+            "initial_sl": float(sl),
             "open_time": datetime.now(timezone.utc).isoformat(),
             "label": label,        # Bot attribution: SAJIM_V1, SAJIM_V2_SURGE, SAJIM_V2_REVERT
             "comment": comment,
             "profit": 0.0,
             "r_multiple": 0.0,
             "status": "OPEN",
+            "simulated": True,
         }
-
         with self._lock:
             self.open_positions[ticket] = position
 
         logger.info(
-            f"[cTrader ORDER FILLED] #{ticket} | [{label}] {action.upper()} {volume} {symbol} "
+            f"[cTrader SIMULATED FILL] #{ticket} | [{label}] {action.upper()} {volume} {symbol} "
             f"@ {fill_price:.5f} | SL: {sl:.5f} | TP: {tp:.5f} | Comment: {comment}"
         )
-
         return {
             "success": True,
             "ticket": ticket,
             "order_id": ticket,
             "fill_price": fill_price,
             "label": label,
-            "status": "FILLED",
+            "status": "SIMULATED",
+            "simulated": True,
         }
 
     def modify_position(self, position_id: int, sl: float, tp: Optional[float] = None) -> bool:
-        """Modifies Stop Loss and Take Profit (used by Hummingbird & Two-Stage Ratchet)."""
+        """Modifies SL/TP. Real mode not implemented -> False."""
+        if not self.simulation_mode:
+            logger.error(f"[cTrader Bridge] {NOT_IMPLEMENTED_MSG}: modify #{position_id} NOT sent.")
+            return False
         with self._lock:
             pos = self.open_positions.get(position_id)
             if not pos:
@@ -351,8 +357,29 @@ class CTraderBridge:
             pos["sl"] = float(sl)
             if tp is not None:
                 pos["tp"] = float(tp)
-        logger.info(f"[cTrader MODIFIED] #{position_id} [{pos['label']}] New SL: {sl:.5f}")
+        logger.info(f"[cTrader SIMULATED MODIFY] #{position_id} [{pos['label']}] New SL: {sl:.5f}")
         return True
+
+    def _quote_to_account_ccy(self, amount: float, symbol: str, price: float) -> Tuple[Optional[float], bool]:
+        """
+        Converts a P&L amount in the symbol's QUOTE currency to the (USD) account currency.
+        Returns (amount_usd, converted_ok).
+        """
+        clean = symbol.replace(".c", "").upper()
+        quote = clean[3:6] if len(clean) >= 6 else ""
+        base = clean[:3]
+        if quote == "USD":
+            return amount, True
+        if base == "USD" and price > 0:
+            return amount / price, True
+        # Cross: need QUOTEUSD or USDQUOTE
+        q_usd = self.spot_prices.get(f"{quote}USD")
+        if q_usd:
+            return amount * q_usd["bid"], True
+        usd_q = self.spot_prices.get(f"USD{quote}")
+        if usd_q and usd_q["bid"] > 0:
+            return amount / usd_q["bid"], True
+        return None, False
 
     def close_position(
         self,
@@ -360,40 +387,51 @@ class CTraderBridge:
         reason: str = "MANUAL_OR_EXIT",
         close_price: Optional[float] = None,
     ) -> Dict[str, Any]:
-        """Closes position, books profit, and archives deal to closed ledger."""
+        """Closes position. Real mode not implemented -> success=False."""
+        if not self.simulation_mode:
+            logger.error(f"[cTrader Bridge] {NOT_IMPLEMENTED_MSG}: close #{position_id} NOT sent.")
+            return {"success": False, "error": NOT_IMPLEMENTED_MSG, "simulated": False}
+
         with self._lock:
             pos = self.open_positions.pop(position_id, None)
             if not pos:
-                return {"success": False, "error": "Position not found"}
+                return {"success": False, "error": "Position not found", "simulated": True}
 
-            sym_info = self.get_symbol_info(pos["symbol"])
-            exit_price = close_price or (sym_info["bid"] if pos["action"] == "BUY" else sym_info["ask"])
+            sym_info = self.get_symbol_info(pos["symbol"]) or {}
+            exit_price = close_price or (sym_info.get("bid") if pos["action"] == "BUY" else sym_info.get("ask"))
+            if not exit_price:
+                self.open_positions[position_id] = pos
+                return {"success": False, "error": "No simulated quote", "simulated": True}
 
-            # Compute Profit & R-Multiple
             is_buy = pos["action"] == "BUY"
             price_diff = (exit_price - pos["entry_price"]) if is_buy else (pos["entry_price"] - exit_price)
-            init_risk = abs(pos["entry_price"] - pos["sl"]) if pos["sl"] > 0 else sym_info["point"] * 100
+            init_risk = abs(pos["entry_price"] - pos.get("initial_sl", pos["sl"])) if pos.get("initial_sl", pos["sl"]) > 0 else 0.0
 
-            contract_size = sym_info["trade_contract_size"]
-            dollar_profit = round(price_diff * pos["volume"] * contract_size, 2)
-            r_multiple = round(price_diff / init_risk, 2) if init_risk > 0 else 1.0
+            contract_size = sym_info.get("trade_contract_size", 100000.0)
+            quote_profit = price_diff * pos["volume"] * contract_size
+            usd_profit, converted = self._quote_to_account_ccy(quote_profit, pos["symbol"], exit_price)
+            r_multiple = round(price_diff / init_risk, 2) if init_risk > 0 else None
 
             pos["exit_price"] = exit_price
             pos["close_time"] = datetime.now(timezone.utc).isoformat()
-            pos["profit"] = dollar_profit
+            pos["profit"] = round(usd_profit, 2) if usd_profit is not None else None
+            pos["profit_quote_ccy"] = round(quote_profit, 2)
+            pos["pnl_currency_converted"] = converted
             pos["r_multiple"] = r_multiple
             pos["close_reason"] = reason
             pos["status"] = "CLOSED"
+            pos["simulated"] = True
 
             self.closed_deals.append(pos)
-            self.account_info["balance"] = round(self.account_info["balance"] + dollar_profit, 2)
-            self.account_info["equity"] = self.account_info["balance"]
+            if usd_profit is not None:
+                self.account_info["balance"] = round(self.account_info["balance"] + usd_profit, 2)
+                self.account_info["equity"] = self.account_info["balance"]
 
         logger.info(
-            f"[cTrader CLOSED] #{position_id} [{pos['label']}] {pos['symbol']} @ {exit_price:.5f} | "
-            f"PnL: ${dollar_profit:+.2f} USD (+{r_multiple:.2f}R) | Reason: {reason}"
+            f"[cTrader SIMULATED CLOSE] #{position_id} [{pos['label']}] {pos['symbol']} @ {exit_price:.5f} | "
+            f"PnL: {pos['profit']} USD (converted={converted}) | R: {r_multiple} | Reason: {reason}"
         )
-        return {"success": True, "deal": pos}
+        return {"success": True, "deal": pos, "simulated": True}
 
     # ---------------------------------------------------------------------------
     # Portfolio & Telemetry Queries
@@ -415,40 +453,39 @@ class CTraderBridge:
         return deals[-limit:]
 
     def get_account_telemetry(self) -> Dict[str, Any]:
-        """Provides full institutional account metrics for WebApp and Investors."""
+        """Account metrics. balance/equity are None unless known (connected or simulated)."""
         open_count = len(self.open_positions)
-        floating_pnl = sum(p.get("profit", 0.0) for p in self.open_positions.values())
-        equity = round(self.account_info["balance"] + floating_pnl, 2)
-
-        # Per-bot position counts
-        v1_count = len(self.get_positions(label="SAJIM_V1"))
-        v2_surge_count = len(self.get_positions(label="SAJIM_V2_SURGE"))
-        v2_revert_count = len(self.get_positions(label="SAJIM_V2_REVERT"))
+        floating_pnl = sum(float(p.get("profit") or 0.0) for p in self.open_positions.values())
+        balance = self.account_info.get("balance")
+        equity = round(balance + floating_pnl, 2) if balance is not None else None
 
         return {
-            "account_id": self.account_info["account_id"],
-            "broker": self.account_info["broker"],
-            "environment": self.account_info["environment"],
-            "balance": self.account_info["balance"],
+            "account_id": self.account_info.get("account_id"),
+            "broker": self.account_info.get("broker"),
+            "environment": self.account_info.get("environment"),
+            "balance": balance,
             "equity": equity,
-            "currency": self.account_info["currency"],
+            "currency": self.account_info.get("currency"),
             "floating_pnl": round(floating_pnl, 2),
             "total_open_positions": open_count,
             "bot_breakdown": {
-                "sajim_v1": v1_count,
-                "sajim_v2_surge": v2_surge_count,
-                "sajim_v2_revert": v2_revert_count,
+                "sajim_v1": len(self.get_positions(label="SAJIM_V1")),
+                "sajim_v2_surge": len(self.get_positions(label="SAJIM_V2_SURGE")),
+                "sajim_v2_revert": len(self.get_positions(label="SAJIM_V2_REVERT")),
             },
             "is_connected": self.is_connected,
-            "mode": "HEADLESS_PURE_PYTHON",
+            "simulated": self.simulation_mode,
+            "last_error": self.last_error,
+            "mode": self.account_info.get("mode"),
         }
 
-    def _reconcile_account_state(self):
-        """Queries broker for active positions and balances."""
-        pass
+    def _reconcile_account_state(self) -> bool:
+        """Queries broker for balances/positions. Not implemented -> False."""
+        self.last_error = "cTrader account reconciliation not implemented"
+        return False
 
 
 if __name__ == "__main__":
     bridge = CTraderBridge()
-    bridge.connect()
-    print("[+] cTrader Bridge Telemetry:", bridge.get_account_telemetry())
+    ok = bridge.connect()
+    print("[+] cTrader Bridge connected:" if ok else "[!] cTrader Bridge NOT connected:", bridge.get_account_telemetry())

@@ -11,7 +11,10 @@ Purpose:
       * Sharpe & Sortino Ratios (downside risk penalty)
       * Maximum Drawdown (MDD) & Peak Equity Trajectory
       * Win Rate, Payoff Ratio, and Asymmetry Index
-      * Scaled Compounding Projections (30d, 90d, 180d, 365d) for Investors
+      * Hypothetical LINEAR extrapolations of observed per-trade EV (no growth multipliers),
+        clearly labelled as such; they are not forecasts.
+  - Edge labels depend on sample size: below MIN_SAMPLE_TRADES closed trades no edge is
+    claimed at all. Past/backtest results do not guarantee future performance.
 ========================================================================================
 """
 
@@ -28,6 +31,21 @@ logging.basicConfig(level=logging.INFO)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.abspath(os.path.join(BASE_DIR, ".."))
+
+MIN_SAMPLE_TRADES = 30          # below this, no edge label is assigned
+ROBUST_SAMPLE_TRADES = 100      # below this, labels are marked PRELIMINARY
+DISCLAIMER = (
+    "Metrics are computed from the supplied closed trades only. Small samples are not "
+    "statistically meaningful; projections are hypothetical linear extrapolations, not "
+    "forecasts. Past or simulated performance does not guarantee future results."
+)
+
+
+def _profit(t: Dict[str, Any]) -> float:
+    try:
+        return float(t.get("profit") or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
 
 
 class QuantEvaluator:
@@ -57,13 +75,14 @@ class QuantEvaluator:
                 "current_equity": initial_capital,
                 "net_profit": 0.0,
                 "max_drawdown_pct": 0.0,
-                "sustainability": "PENDING_SAMPLE",
+                "sustainability": "INSUFFICIENT DATA (no closed trades) [NO_EDGE_CLAIM]",
+                "disclaimer": DISCLAIMER,
             }
 
         total_trades = len(trades)
-        wins = [t for t in trades if t.get("profit", 0.0) > 0.05]
-        losses = [t for t in trades if t.get("profit", 0.0) < -0.05]
-        scratches = [t for t in trades if abs(t.get("profit", 0.0)) <= 0.05]
+        wins = [t for t in trades if _profit(t) > 0.05]
+        losses = [t for t in trades if _profit(t) < -0.05]
+        scratches = [t for t in trades if abs(_profit(t)) <= 0.05]
 
         num_wins = len(wins)
         num_losses = len(losses)
@@ -72,8 +91,8 @@ class QuantEvaluator:
         win_rate = (num_wins / total_trades) * 100.0 if total_trades > 0 else 0.0
         loss_rate = (num_losses / total_trades) * 100.0 if total_trades > 0 else 0.0
 
-        gross_profit = sum(t.get("profit", 0.0) for t in wins)
-        gross_loss = abs(sum(t.get("profit", 0.0) for t in losses))
+        gross_profit = sum(_profit(t) for t in wins)
+        gross_loss = abs(sum(_profit(t) for t in losses))
         net_profit = round(gross_profit - gross_loss, 2)
 
         avg_win = (gross_profit / num_wins) if num_wins > 0 else 0.0
@@ -90,7 +109,7 @@ class QuantEvaluator:
         expectancy_dollar = round((p_win * avg_win) - (p_loss * avg_loss), 2)
 
         # R-Multiple Expectancy
-        r_vals = [t.get("r_multiple", 0.0) for t in trades]
+        r_vals = [float(t["r_multiple"]) for t in trades if t.get("r_multiple") is not None]
         avg_r = sum(r_vals) / len(r_vals) if r_vals else 0.0
 
         # Equity Curve & Maximum Drawdown (MDD)
@@ -99,7 +118,7 @@ class QuantEvaluator:
         max_dd_dollars = 0.0
         max_dd_pct = 0.0
 
-        profits = [t.get("profit", 0.0) for t in trades]
+        profits = [_profit(t) for t in trades]
         for p in profits:
             current_eq += p
             if current_eq > peak:
@@ -127,23 +146,30 @@ class QuantEvaluator:
             sharpe_per_trade = 0.0
             sortino_per_trade = 0.0
 
-        # Sustainability & Company Scaling Verdict
-        if expectancy_dollar > 0 and profit_factor >= 1.35 and max_dd_pct <= 5.0:
-            sustainability = "INSTITUTIONAL ALPHA (HIGHLY SUSTAINABLE & INVESTOR-READY) [CONFIRMED_ALPHA]"
-        elif expectancy_dollar > 0 and profit_factor >= 1.15:
-            sustainability = "MODERATE EDGE (SUSTAINABLE WITH ASYMMETRIC MANAGEMENT) [MODERATE_EDGE]"
-        elif expectancy_dollar > 0:
-            sustainability = "MARGINAL EDGE (NEEDS HUMMINGBIRD TUNING) [TUNING_REQUIRED]"
+        # Edge label: driven by sample size first, then by the observed metrics
+        if total_trades < MIN_SAMPLE_TRADES:
+            sustainability = (
+                f"INSUFFICIENT SAMPLE ({total_trades} < {MIN_SAMPLE_TRADES} closed trades) - "
+                f"no edge can be claimed [NO_EDGE_CLAIM]"
+            )
         else:
-            sustainability = "EDGE DECAY (REVISION REQUIRED) [HALT_EDGE_DECAY]"
+            prefix = "PRELIMINARY " if total_trades < ROBUST_SAMPLE_TRADES else ""
+            if expectancy_dollar > 0 and profit_factor >= 1.35 and max_dd_pct <= 5.0:
+                sustainability = f"{prefix}POSITIVE EDGE OBSERVED (n={total_trades}, PF {profit_factor}) [POSITIVE_EDGE]"
+            elif expectancy_dollar > 0 and profit_factor >= 1.15:
+                sustainability = f"{prefix}MODERATE EDGE OBSERVED (n={total_trades}, PF {profit_factor}) [MODERATE_EDGE]"
+            elif expectancy_dollar > 0:
+                sustainability = f"{prefix}MARGINAL EDGE (n={total_trades}, PF {profit_factor}) [TUNING_REQUIRED]"
+            else:
+                sustainability = f"NO POSITIVE EDGE (n={total_trades}, EV {expectancy_dollar}) [HALT_EDGE_DECAY]"
 
-        # Investor Scaling Projection (compounding model over N trades)
-        # Assumes modest 10 trades per week at current EV
+        # Hypothetical LINEAR extrapolation of the observed per-trade EV (no compounding,
+        # no growth multipliers). Only meaningful when the sample is adequate.
         trades_per_month = 40
         proj_30d = round(current_eq + (expectancy_dollar * trades_per_month), 2)
-        proj_90d = round(current_eq + (expectancy_dollar * trades_per_month * 3 * 1.1), 2)
-        proj_180d = round(current_eq + (expectancy_dollar * trades_per_month * 6 * 1.25), 2)
-        proj_365d = round(current_eq + (expectancy_dollar * trades_per_month * 12 * 1.5), 2)
+        proj_90d = round(current_eq + (expectancy_dollar * trades_per_month * 3), 2)
+        proj_180d = round(current_eq + (expectancy_dollar * trades_per_month * 6), 2)
+        proj_365d = round(current_eq + (expectancy_dollar * trades_per_month * 12), 2)
 
         return {
             "total_trades": total_trades,
@@ -169,13 +195,21 @@ class QuantEvaluator:
             "initial_capital": initial_capital,
             "current_equity": round(current_eq, 2),
             "sustainability": sustainability,
+            "sample_adequate": total_trades >= MIN_SAMPLE_TRADES,
+            "disclaimer": DISCLAIMER,
             "investor_projections": {
+                "hypothetical": True,
+                "basis": (
+                    f"Linear extrapolation of observed EV ({expectancy_dollar}/trade) at an ASSUMED "
+                    f"{trades_per_month} trades/month. Not a forecast."
+                    + ("" if total_trades >= MIN_SAMPLE_TRADES else " Sample too small to be meaningful.")
+                ),
                 "trades_modeled_per_month": trades_per_month,
                 "projected_equity_30d": proj_30d,
                 "projected_equity_90d": proj_90d,
                 "projected_equity_180d": proj_180d,
                 "projected_equity_365d": proj_365d,
-                "projected_1yr_roi_pct": round(((proj_365d - initial_capital) / initial_capital) * 100, 2)
+                "projected_1yr_roi_pct": round(((proj_365d - initial_capital) / initial_capital) * 100, 2) if initial_capital else 0.0
             }
         }
 

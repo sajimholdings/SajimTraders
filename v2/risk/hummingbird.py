@@ -9,20 +9,27 @@ Modular Architecture: Strictly < 150 lines.
 ========================================================================================
 """
 
-from typing import Any, Tuple
+from typing import Any, Optional, Tuple
 import MetaTrader5 as mt5
+
+from v2.risk import constants as RC
 
 
 class HummingbirdEvaluator:
     """Evaluates whether an active winning trade has hit peak momentum exhaustion."""
 
     @staticmethod
-    def check_exhaustion(pos: Any, profit_r: float, sym_info: Any) -> Tuple[bool, str]:
+    def check_exhaustion(pos: Any, profit_r: float, sym_info: Any, max_r: Optional[float] = None) -> Tuple[bool, str]:
         """
-        Evaluates active winning position (+1.50R <= profit_r <= +2.85R) for M1 momentum exhaustion.
+        Evaluates an active winning position (profit_r >= HUMMINGBIRD_MIN_R, and < max_r when
+        given) for M1 momentum exhaustion. profit_r must be measured on the INITIAL risk.
+        This is the single shared implementation used by the V2 dual bot and the
+        stand-alone V2 bot (bots/sajim_v2_bot.py, max_r=HUMMINGBIRD_V2_BOT_MAX_R).
         Returns: (should_harvest, reason)
         """
-        if profit_r < 1.50:
+        if profit_r < RC.HUMMINGBIRD_MIN_R:
+            return False, ""
+        if max_r is not None and profit_r >= max_r:
             return False, ""
 
         rates = mt5.copy_rates_from_pos(pos.symbol, mt5.TIMEFRAME_M1, 0, 25)
@@ -89,36 +96,36 @@ class HummingbirdEvaluator:
         vol_1 = float(bar_1['tick_volume'])
 
         # 1. Counter-Wick Supply/Demand Absorption
-        if profit_r >= 1.80 and wick_ratio_0 >= 0.35:
+        if profit_r >= RC.HUMMINGBIRD_DEEP_WICK_R and wick_ratio_0 >= 0.35:
             return True, f"M1 Counter-Wick Rejection ({wick_ratio_0*100:.1f}%) at +{profit_r:.2f}R"
-        if profit_r >= 1.50 and wick_ratio_0 >= 0.45:
+        if profit_r >= RC.HUMMINGBIRD_MIN_R and wick_ratio_0 >= 0.45:
             return True, f"M1 Severe Rejection Wick ({wick_ratio_0*100:.1f}%) at +{profit_r:.2f}R"
-        if profit_r >= 1.50 and wick_ratio_1 >= 0.40 and adverse_close_0:
+        if profit_r >= RC.HUMMINGBIRD_MIN_R and wick_ratio_1 >= 0.40 and adverse_close_0:
             return True, f"M1 Peak Wick Invalidation ({wick_ratio_1*100:.1f}%) at +{profit_r:.2f}R"
 
         # 2. Candle Momentum Decay & Velocity Stalling
-        if profit_r >= 1.50 and adverse_close_0 and adverse_close_1:
+        if profit_r >= RC.HUMMINGBIRD_MIN_R and adverse_close_0 and adverse_close_1:
             return True, f"M1 Consecutive Momentum Decay (2 Adverse Bars) at +{profit_r:.2f}R"
-        if profit_r >= 1.50 and body_2 > (m1_atr * 0.80) and body_1 < (body_2 * 0.30) and adverse_close_0:
+        if profit_r >= RC.HUMMINGBIRD_MIN_R and body_2 > (m1_atr * 0.80) and body_1 < (body_2 * 0.30) and adverse_close_0:
             return True, f"M1 Velocity Stalling at +{profit_r:.2f}R"
 
         # 3. Micro-Structure Break
-        if profit_r >= 1.50 and micro_struct_break:
+        if profit_r >= RC.HUMMINGBIRD_MIN_R and micro_struct_break:
             target_side = "Prev M1 Low" if is_buy else "Prev M1 High"
             return True, f"M1 Micro-Structure Break ({target_side}) at +{profit_r:.2f}R"
 
         # 4. Baseline Envelope Overextension Stretch
-        if profit_r >= 1.70 and dist_atr >= 2.20 and (wick_ratio_0 >= 0.25 or adverse_close_0):
+        if profit_r >= RC.HUMMINGBIRD_STRETCH_R and dist_atr >= 2.20 and (wick_ratio_0 >= 0.25 or adverse_close_0):
             return True, f"M1 Baseline Envelope Stretch ({dist_atr:.1f}x ATR) at +{profit_r:.2f}R"
 
         # 5. Climax Volume Absorption
-        if profit_r >= 1.50 and (vol_0 >= 2.0 * avg_vol or vol_1 >= 2.0 * avg_vol):
+        if profit_r >= RC.HUMMINGBIRD_MIN_R and (vol_0 >= 2.0 * avg_vol or vol_1 >= 2.0 * avg_vol):
             if wick_ratio_0 >= 0.30 or wick_ratio_1 >= 0.30 or adverse_close_0:
                 peak_vol = max(vol_0, vol_1)
                 return True, f"M1 Climax Volume Absorption ({peak_vol/avg_vol:.1f}x) at +{profit_r:.2f}R"
 
         # 6. Peak Defense Stall
-        if profit_r >= 2.20 and (adverse_close_0 or wick_ratio_0 >= 0.25):
+        if profit_r >= RC.HUMMINGBIRD_PEAK_DEFENSE_R and (adverse_close_0 or wick_ratio_0 >= 0.25):
             return True, f"M1 Peak Profit Defense Stall at +{profit_r:.2f}R"
 
         return False, ""

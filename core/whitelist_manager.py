@@ -24,6 +24,8 @@ WHITELIST_JSON_PATH = os.path.join(ROOT_DIR, "config", "master_trading_whitelist
 
 logger = logging.getLogger("WhitelistManager")
 
+TIMEFRAMES = {"M1", "M2", "M3", "M5", "M10", "M15", "M30", "H1", "H2", "H4", "H6", "H8", "H12", "D1", "W1", "MN1"}
+
 
 class WhitelistManager:
     """
@@ -37,16 +39,34 @@ class WhitelistManager:
         self._load()
 
     def _clean_symbol(self, symbol: str) -> str:
-        """Strips broker suffixes (.c, _c, etc.) to get base canonical symbol."""
-        s = symbol.upper().strip()
-        for suffix in (".C", "_C", "C"):
-            if s.endswith(suffix):
-                candidate = s[:-len(suffix)]
-                if len(candidate) >= 3 and not candidate.endswith("USD"):
-                    s = candidate
-                elif suffix in (".C", "_C"):
-                    s = s[:-len(suffix)]
+        """
+        Strips broker suffixes to get the base canonical symbol:
+          'XAUUSD.c' / 'XAUUSD_c' -> 'XAUUSD', 'BTCUSDc' / 'EURUSDc' -> 'BTCUSD' / 'EURUSD',
+          'GBPJPYC' -> 'GBPJPY' (upper-case 'C' only stripped when it cannot be part of 'USDC').
+        """
+        s = str(symbol).strip()
+        lowered = s.lower()
+        if lowered.endswith(".c") or lowered.endswith("_c"):
+            return s[:-2].upper()
+        # Lower-case 'c' cent suffix on an otherwise upper-case symbol (e.g. BTCUSDc)
+        if len(s) >= 4 and s.endswith("c") and s[:-1].upper() == s[:-1]:
+            return s[:-1].upper()
+        s = s.upper()
+        if s.endswith("C"):
+            candidate = s[:-1]
+            if len(candidate) >= 3 and not candidate.endswith("USD"):
+                s = candidate
         return s
+
+    @staticmethod
+    def _split_symbol_tf(entry: str):
+        """'GBPJPY_M15' -> ('GBPJPY', 'M15'); 'XAUGBP' -> ('XAUGBP', None)."""
+        e = str(entry).strip()
+        if "_" in e:
+            base, tf = e.rsplit("_", 1)
+            if tf.upper() in TIMEFRAMES:
+                return base, tf.upper()
+        return e, None
 
     def _load(self) -> None:
         """Reloads JSON from disk if file was updated."""
@@ -90,20 +110,41 @@ class WhitelistManager:
         return combined
 
     def get_toxic_blacklist(self) -> Set[str]:
-        """Returns blacklisted toxic assets."""
+        """Returns symbol-level blacklisted toxic assets (with broker suffix variants)."""
         self._load()
         bl = set()
-        for s in self.data.get("toxic_blacklist", []):
-            bl.add(s)
-            bl.add(f"{s}.c")
-            bl.add(f"{s}_c")
+        for entry in self.data.get("toxic_blacklist", []):
+            base, tf = self._split_symbol_tf(entry)
+            if tf is not None:
+                continue  # per-timeframe entries are handled by get_toxic_timeframes()
+            clean = self._clean_symbol(base)
+            for variant in (base, clean, f"{clean}.c", f"{clean}_c", f"{clean}c"):
+                bl.add(variant)
         return bl
 
-    def is_toxic(self, symbol: str) -> bool:
-        """Checks if symbol is toxic."""
+    def get_toxic_timeframes(self) -> Dict[str, Set[str]]:
+        """Returns per-timeframe toxic fronts, e.g. {'GBPJPY': {'M15'}} from 'GBPJPY_M15'."""
+        self._load()
+        out: Dict[str, Set[str]] = {}
+        for entry in self.data.get("toxic_blacklist", []):
+            base, tf = self._split_symbol_tf(entry)
+            if tf is None:
+                continue
+            out.setdefault(self._clean_symbol(base), set()).add(tf)
+        return out
+
+    def is_toxic(self, symbol: str, timeframe: Optional[str] = None) -> bool:
+        """
+        Checks if a symbol (or a symbol + timeframe front) is toxic.
+        Symbol-level entries block every timeframe; 'SYMBOL_TF' entries block that front only.
+        """
         clean = self._clean_symbol(symbol)
         bl = self.get_toxic_blacklist()
-        return clean in bl or symbol in bl
+        if clean in bl or symbol in bl:
+            return True
+        if timeframe:
+            return str(timeframe).strip().upper() in self.get_toxic_timeframes().get(clean, set())
+        return False
 
     def is_live_trading_approved(self, symbol: str) -> bool:
         """Checks if symbol is authorized for REAL MONEY execution."""
@@ -123,11 +164,11 @@ class WhitelistManager:
     def is_pair_approved(self, strategy_name: str, symbol: str, timeframe: str) -> bool:
         """
         Full authorization check:
-        1. Must NOT be toxic.
+        1. Must NOT be toxic (symbol-level or this symbol_TF front).
         2. Must be in live_trading_whitelist.
         3. Strategy must have an entry for this symbol & timeframe.
         """
-        if self.is_toxic(symbol):
+        if self.is_toxic(symbol, timeframe):
             return False
 
         if not self.is_live_trading_approved(symbol):

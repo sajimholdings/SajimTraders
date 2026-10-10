@@ -35,7 +35,10 @@ for p in (ROOT_DIR, BASE_DIR, os.path.join(ROOT_DIR, "core"), os.path.join(ROOT_
         sys.path.insert(0, p)
 
 import MetaTrader5 as mt5
-from vault_original_beep.raw_beep_equations import OriginalRawBeep
+try:
+    from vault_original_beep.raw_beep_equations import OriginalRawBeep  # private BEEP vault (git-ignored)
+except ImportError:  # pragma: no cover - depends on private modules
+    OriginalRawBeep = None
 
 # Output Paths
 STATUS_FILE = os.path.join(ROOT_DIR, "edge_matrix_status.json")
@@ -75,6 +78,225 @@ def calculate_atr(bars: List[Dict[str, Any]], period: int = 14) -> List[float]:
     return atr_list
 
 
+METHODOLOGY_VERSION = "2.0-conservative-intrabar"
+METHODOLOGY_NOTE = (
+    "Intrabar ordering is conservative: each bar first tests the stop loss that was in force "
+    "at the bar's open against the bar's adverse extreme, then the take-profit, and only then "
+    "ratchets the stop using the bar's favourable extreme for the NEXT bar. Results produced "
+    "before this version (including the committed docs/edge_matrix_results.json of 2026-09-09) "
+    "ratcheted the stop on the bar's high and then tested it against the SAME bar's low, which "
+    "inflates win rates and profit factors; they must be regenerated. Selection on these "
+    "in-sample metrics also needs out-of-sample validation (--oos-split)."
+)
+
+
+def _simulate_trades(
+    bars: List[Dict[str, Any]],
+    atr_series: List[float],
+    raw_beep: Any,
+    spread_val: float,
+    start_idx: int,
+    end_idx: int,
+    lookback: int,
+    target_rr: float,
+    be_trigger_r: float,
+    lock_trigger_r: float,
+    min_mass_threshold: float,
+) -> List[Dict[str, Any]]:
+    """
+    Simulates the BEEP lifecycle on bars[start_idx:end_idx] (signals may look back before
+    start_idx; trades never use bars at or beyond end_idx).
+    Conservative intrabar ordering: SL (pre-bar stop, adverse extreme) -> TP -> time stop ->
+    ratchet for the next bar.
+    """
+    trades: List[Dict[str, Any]] = []
+    in_trade = False
+    trade: Dict[str, Any] = {}
+    first = max(start_idx, lookback + 14)
+
+    for i in range(first, end_idx - 1):
+        cur_bar = bars[i]
+        next_bar = bars[i + 1]
+        atr = atr_series[i]
+
+        # 1. Active Trade Lifecycle Management
+        if in_trade:
+            entry_p = trade["entry_price"]
+            direction = trade["direction"]
+            init_risk = trade["initial_risk"]
+            elapsed_bars = i - trade["entry_bar_idx"]
+            bar_open, bar_high, bar_low, bar_close = cur_bar["open"], cur_bar["high"], cur_bar["low"], cur_bar["close"]
+            sl_in_force = trade["current_sl"]
+
+            if direction == "BUY":
+                # (a) Adverse extreme vs. the stop in force at bar open (gap -> fill at open)
+                if bar_low <= sl_in_force:
+                    exit_price = min(bar_open, sl_in_force)
+                    pnl_r = (exit_price - entry_p) / init_risk
+                    trades.append({"direction": "BUY", "pnl_r": round(pnl_r, 3),
+                                   "outcome": "WIN" if pnl_r > 0.1 else ("BE" if pnl_r >= 0 else "LOSS"),
+                                   "bars_held": elapsed_bars})
+                    in_trade = False
+                    continue
+                # (b) Take profit
+                if bar_high >= trade["tp_price"]:
+                    trades.append({"direction": "BUY", "pnl_r": round(target_rr, 3), "outcome": "WIN",
+                                   "bars_held": elapsed_bars})
+                    in_trade = False
+                    continue
+                # (c) Lambda time stop (decided at the close)
+                close_r = (bar_close - entry_p) / init_risk if init_risk > 0 else 0.0
+                lambda_val = raw_beep.calculate_raw_lambda(elapsed_bars, decay_rate=0.04)
+                if lambda_val < 0.35 and close_r < 1.0:
+                    trades.append({"direction": "BUY", "pnl_r": round(close_r, 3),
+                                   "outcome": "WIN" if close_r > 0 else "LOSS", "bars_held": elapsed_bars})
+                    in_trade = False
+                    continue
+                # (d) Ratchet using this bar's favourable extreme -> applies from the NEXT bar
+                peak_r = (bar_high - entry_p) / init_risk if init_risk > 0 else 0.0
+                if peak_r >= lock_trigger_r:
+                    trade["current_sl"] = max(trade["current_sl"], entry_p + (1.0 * init_risk))
+                elif peak_r >= be_trigger_r:
+                    trade["current_sl"] = max(trade["current_sl"], entry_p + (0.15 * init_risk))
+
+            elif direction == "SELL":
+                if bar_high >= sl_in_force:
+                    exit_price = max(bar_open, sl_in_force)
+                    pnl_r = (entry_p - exit_price) / init_risk
+                    trades.append({"direction": "SELL", "pnl_r": round(pnl_r, 3),
+                                   "outcome": "WIN" if pnl_r > 0.1 else ("BE" if pnl_r >= 0 else "LOSS"),
+                                   "bars_held": elapsed_bars})
+                    in_trade = False
+                    continue
+                if bar_low <= trade["tp_price"]:
+                    trades.append({"direction": "SELL", "pnl_r": round(target_rr, 3), "outcome": "WIN",
+                                   "bars_held": elapsed_bars})
+                    in_trade = False
+                    continue
+                close_r = (entry_p - bar_close) / init_risk if init_risk > 0 else 0.0
+                lambda_val = raw_beep.calculate_raw_lambda(elapsed_bars, decay_rate=0.04)
+                if lambda_val < 0.35 and close_r < 1.0:
+                    trades.append({"direction": "SELL", "pnl_r": round(close_r, 3),
+                                   "outcome": "WIN" if close_r > 0 else "LOSS", "bars_held": elapsed_bars})
+                    in_trade = False
+                    continue
+                peak_r = (entry_p - bar_low) / init_risk if init_risk > 0 else 0.0
+                if peak_r >= lock_trigger_r:
+                    trade["current_sl"] = min(trade["current_sl"], entry_p - (1.0 * init_risk))
+                elif peak_r >= be_trigger_r:
+                    trade["current_sl"] = min(trade["current_sl"], entry_p - (0.15 * init_risk))
+
+        # 2. Look for New BEEP Signal if flat
+        if not in_trade:
+            window_closes = [b["close"] for b in bars[i - lookback + 1 : i + 1]]
+            b_t = raw_beep.calculate_raw_baseline_B(window_closes, z_threshold=2.0)
+            m_t = raw_beep.calculate_raw_mass_M(window_closes, baseline_B=b_t)
+
+            cur_close = cur_bar["close"]
+
+            if m_t >= min_mass_threshold:
+                if cur_close > b_t:
+                    # Buy Entry: Pay the Ask (Open + spread)
+                    entry_price = next_bar["open"] + spread_val
+                    recent_lows = [b["low"] for b in bars[i - 4 : i + 1]]
+                    swing_low = min(recent_lows)
+                    sl_dist = max(entry_price - swing_low, 1.2 * atr, 3.0 * spread_val)
+                    in_trade = True
+                    trade = {
+                        "direction": "BUY",
+                        "entry_price": entry_price,
+                        "current_sl": entry_price - sl_dist,
+                        "initial_risk": sl_dist,
+                        "tp_price": entry_price + (target_rr * sl_dist),
+                        "entry_bar_idx": i + 1,
+                    }
+                elif cur_close < b_t:
+                    # Sell Entry: Enter at Bid
+                    entry_price = next_bar["open"]
+                    recent_highs = [b["high"] for b in bars[i - 4 : i + 1]]
+                    swing_high = max(recent_highs)
+                    sl_dist = max(swing_high - entry_price, 1.2 * atr, 3.0 * spread_val)
+                    in_trade = True
+                    trade = {
+                        "direction": "SELL",
+                        "entry_price": entry_price,
+                        "current_sl": entry_price + sl_dist,
+                        "initial_risk": sl_dist,
+                        "tp_price": entry_price - (target_rr * sl_dist),
+                        "entry_bar_idx": i + 1,
+                    }
+    return trades
+
+
+def _compute_metrics(trades: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Win rate, PF, expectancy, max DD (R) and edge tier for a list of trades."""
+    if not trades:
+        return {
+            "total_trades": 0, "wins": 0, "losses": 0, "be_count": 0, "win_rate_pct": 0.0,
+            "gross_profit_r": 0.0, "gross_loss_r": 0.0, "net_pnl_r": 0.0, "profit_factor": 0.0,
+            "avg_win_r": 0.0, "avg_loss_r": 0.0, "payoff_ratio": 0.0, "expectancy_r": 0.0,
+            "max_drawdown_r": 0.0, "tier": "INSUFFICIENT_SIGNALS",
+        }
+
+    total_trades = len(trades)
+    winning_trades = [t for t in trades if t["pnl_r"] > 0]
+    losing_trades = [t for t in trades if t["pnl_r"] < 0]
+    be_trades = [t for t in trades if t["pnl_r"] == 0]
+
+    win_count = len(winning_trades)
+    loss_count = len(losing_trades)
+    win_rate = (win_count / total_trades) * 100.0
+
+    gross_profit_r = sum(t["pnl_r"] for t in winning_trades)
+    gross_loss_r = abs(sum(t["pnl_r"] for t in losing_trades)) or 0.001
+    net_pnl_r = sum(t["pnl_r"] for t in trades)
+
+    profit_factor = gross_profit_r / gross_loss_r
+    avg_win_r = (gross_profit_r / win_count) if win_count > 0 else 0.0
+    avg_loss_r = (gross_loss_r / loss_count) if loss_count > 0 else 0.0
+    payoff_ratio = (avg_win_r / avg_loss_r) if avg_loss_r > 0 else 0.0
+
+    expectancy_r = net_pnl_r / total_trades
+
+    cum_r = 0.0
+    peak_r = 0.0
+    max_dd_r = 0.0
+    for t in trades:
+        cum_r += t["pnl_r"]
+        if cum_r > peak_r:
+            peak_r = cum_r
+        dd = peak_r - cum_r
+        if dd > max_dd_r:
+            max_dd_r = dd
+
+    if win_rate >= 50.0 and profit_factor >= 1.60 and expectancy_r >= 0.25:
+        tier = "INSTITUTIONAL EDGE"
+    elif profit_factor >= 1.20 and expectancy_r > 0:
+        tier = "MODERATE EDGE"
+    elif profit_factor >= 1.00:
+        tier = "MARGINAL"
+    else:
+        tier = "NEGATIVE EDGE (BLEEDER)"
+
+    return {
+        "total_trades": total_trades,
+        "wins": win_count,
+        "losses": loss_count,
+        "be_count": len(be_trades),
+        "win_rate_pct": round(win_rate, 1),
+        "gross_profit_r": round(gross_profit_r, 2),
+        "gross_loss_r": round(gross_loss_r, 2),
+        "net_pnl_r": round(net_pnl_r, 2),
+        "profit_factor": round(profit_factor, 2),
+        "avg_win_r": round(avg_win_r, 2),
+        "avg_loss_r": round(avg_loss_r, 2),
+        "payoff_ratio": round(payoff_ratio, 2),
+        "expectancy_r": round(expectancy_r, 3),
+        "max_drawdown_r": round(max_dd_r, 2),
+        "tier": tier,
+    }
+
+
 def simulate_beep_front(
     symbol: str,
     tf_label: str,
@@ -85,9 +307,12 @@ def simulate_beep_front(
     be_trigger_r: float = 1.5,
     lock_trigger_r: float = 2.2,
     min_mass_threshold: float = 35.0,
+    oos_split: float = 0.0,
 ) -> Optional[Dict[str, Any]]:
     """
     Backtests BEEP on a single symbol + timeframe front using MT5 historical data.
+    With oos_split > 0 the last `oos_split` fraction of bars is held out: the tier is
+    assigned on the in-sample part only and out-of-sample metrics are reported alongside.
     """
     si = mt5.symbol_info(symbol)
     if not si:
@@ -115,256 +340,55 @@ def simulate_beep_front(
 
     atr_series = calculate_atr(bars, period=14)
     raw_beep = OriginalRawBeep()
+    params = dict(lookback=lookback, target_rr=target_rr, be_trigger_r=be_trigger_r,
+                  lock_trigger_r=lock_trigger_r, min_mass_threshold=min_mass_threshold)
 
-    trades: List[Dict[str, Any]] = []
-    in_trade = False
-    trade: Dict[str, Any] = {}
+    split_idx = len(bars)
+    if oos_split and 0.0 < oos_split < 0.9:
+        split_idx = int(len(bars) * (1.0 - oos_split))
 
-    for i in range(lookback + 14, len(bars) - 1):
-        cur_bar = bars[i]
-        next_bar = bars[i + 1]
-        atr = atr_series[i]
-
-        # 1. Active Trade Lifecycle Management
-        if in_trade:
-            entry_p = trade["entry_price"]
-            direction = trade["direction"]
-            init_risk = trade["initial_risk"]
-            elapsed_bars = i - trade["entry_bar_idx"]
-
-            bar_high = cur_bar["high"]
-            bar_low = cur_bar["low"]
-
-            if direction == "BUY":
-                cur_r = (bar_high - entry_p) / init_risk if init_risk > 0 else 0.0
-
-                # Two-Stage Trailing Ratchet
-                if cur_r >= lock_trigger_r:
-                    trade["current_sl"] = max(trade["current_sl"], entry_p + (1.0 * init_risk))
-                elif cur_r >= be_trigger_r:
-                    trade["current_sl"] = max(trade["current_sl"], entry_p + (0.15 * init_risk))
-
-                # Check SL hit
-                if bar_low <= trade["current_sl"]:
-                    exit_price = trade["current_sl"]
-                    pnl_r = (exit_price - entry_p) / init_risk
-                    trades.append({
-                        "direction": "BUY",
-                        "pnl_r": round(pnl_r, 3),
-                        "outcome": "WIN" if pnl_r > 0.1 else ("BE" if pnl_r >= 0 else "LOSS"),
-                        "bars_held": elapsed_bars,
-                    })
-                    in_trade = False
-                    continue
-
-                # Check TP hit
-                if bar_high >= trade["tp_price"]:
-                    trades.append({
-                        "direction": "BUY",
-                        "pnl_r": round(target_rr, 3),
-                        "outcome": "WIN",
-                        "bars_held": elapsed_bars,
-                    })
-                    in_trade = False
-                    continue
-
-                # Lambda Time Decay Stop
-                lambda_val = raw_beep.calculate_raw_lambda(elapsed_bars, decay_rate=0.04)
-                if lambda_val < 0.35 and cur_r < 1.0:
-                    exit_price = cur_bar["close"]
-                    pnl_r = (exit_price - entry_p) / init_risk
-                    trades.append({
-                        "direction": "BUY",
-                        "pnl_r": round(pnl_r, 3),
-                        "outcome": "WIN" if pnl_r > 0 else "LOSS",
-                        "bars_held": elapsed_bars,
-                    })
-                    in_trade = False
-                    continue
-
-            elif direction == "SELL":
-                cur_r = (entry_p - bar_low) / init_risk if init_risk > 0 else 0.0
-
-                # Two-Stage Trailing Ratchet
-                if cur_r >= lock_trigger_r:
-                    trade["current_sl"] = min(trade["current_sl"], entry_p - (1.0 * init_risk))
-                elif cur_r >= be_trigger_r:
-                    trade["current_sl"] = min(trade["current_sl"], entry_p - (0.15 * init_risk))
-
-                # Check SL hit
-                if bar_high >= trade["current_sl"]:
-                    exit_price = trade["current_sl"]
-                    pnl_r = (entry_p - exit_price) / init_risk
-                    trades.append({
-                        "direction": "SELL",
-                        "pnl_r": round(pnl_r, 3),
-                        "outcome": "WIN" if pnl_r > 0.1 else ("BE" if pnl_r >= 0 else "LOSS"),
-                        "bars_held": elapsed_bars,
-                    })
-                    in_trade = False
-                    continue
-
-                # Check TP hit
-                if bar_low <= trade["tp_price"]:
-                    trades.append({
-                        "direction": "SELL",
-                        "pnl_r": round(target_rr, 3),
-                        "outcome": "WIN",
-                        "bars_held": elapsed_bars,
-                    })
-                    in_trade = False
-                    continue
-
-                # Lambda Time Decay Stop
-                lambda_val = raw_beep.calculate_raw_lambda(elapsed_bars, decay_rate=0.04)
-                if lambda_val < 0.35 and cur_r < 1.0:
-                    exit_price = cur_bar["close"]
-                    pnl_r = (entry_p - exit_price) / init_risk
-                    trades.append({
-                        "direction": "SELL",
-                        "pnl_r": round(pnl_r, 3),
-                        "outcome": "WIN" if pnl_r > 0 else "LOSS",
-                        "bars_held": elapsed_bars,
-                    })
-                    in_trade = False
-                    continue
-
-        # 2. Look for New BEEP Signal if flat
-        if not in_trade:
-            window_closes = [b["close"] for b in bars[i - lookback + 1 : i + 1]]
-            b_t = raw_beep.calculate_raw_baseline_B(window_closes, z_threshold=2.0)
-            m_t = raw_beep.calculate_raw_mass_M(window_closes, baseline_B=b_t)
-
-            cur_close = cur_bar["close"]
-
-            if m_t >= min_mass_threshold:
-                if cur_close > b_t:
-                    # Buy Entry: Pay the Ask (Open + spread)
-                    entry_price = next_bar["open"] + spread_val
-                    recent_lows = [b["low"] for b in bars[i - 4 : i + 1]]
-                    swing_low = min(recent_lows)
-                    sl_dist = max(entry_price - swing_low, 1.2 * atr, 3.0 * spread_val)
-                    sl_price = entry_price - sl_dist
-                    tp_price = entry_price + (target_rr * sl_dist)
-
-                    in_trade = True
-                    trade = {
-                        "direction": "BUY",
-                        "entry_price": entry_price,
-                        "current_sl": sl_price,
-                        "initial_risk": sl_dist,
-                        "tp_price": tp_price,
-                        "entry_bar_idx": i + 1,
-                    }
-                elif cur_close < b_t:
-                    # Sell Entry: Enter at Bid
-                    entry_price = next_bar["open"]
-                    recent_highs = [b["high"] for b in bars[i - 4 : i + 1]]
-                    swing_high = max(recent_highs)
-                    sl_dist = max(swing_high - entry_price, 1.2 * atr, 3.0 * spread_val)
-                    sl_price = entry_price + sl_dist
-                    tp_price = entry_price - (target_rr * sl_dist)
-
-                    in_trade = True
-                    trade = {
-                        "direction": "SELL",
-                        "entry_price": entry_price,
-                        "current_sl": sl_price,
-                        "initial_risk": sl_dist,
-                        "tp_price": tp_price,
-                        "entry_bar_idx": i + 1,
-                    }
-
-    recent_atr = atr_series[-1] if atr_series else 0.001
-    friction_eta = (spread_val / recent_atr) if recent_atr > 0 else 0.0
-
-    if not trades:
-        return {
-            "symbol": symbol,
-            "timeframe": tf_label,
-            "bars_evaluated": len(bars),
-            "total_trades": 0,
-            "wins": 0,
-            "losses": 0,
-            "be_count": 0,
-            "win_rate_pct": 0.0,
-            "gross_profit_r": 0.0,
-            "gross_loss_r": 0.0,
-            "net_pnl_r": 0.0,
-            "profit_factor": 0.0,
-            "avg_win_r": 0.0,
-            "avg_loss_r": 0.0,
-            "payoff_ratio": 0.0,
-            "expectancy_r": 0.0,
-            "max_drawdown_r": 0.0,
-            "spread_friction_eta": round(friction_eta, 4),
-            "tier": "INSUFFICIENT_SIGNALS",
-        }
-
-    total_trades = len(trades)
-    winning_trades = [t for t in trades if t["pnl_r"] > 0]
-    losing_trades = [t for t in trades if t["pnl_r"] < 0]
-    be_trades = [t for t in trades if t["pnl_r"] == 0]
-
-    win_count = len(winning_trades)
-    loss_count = len(losing_trades)
-    win_rate = (win_count / total_trades) * 100.0
-
-    gross_profit_r = sum(t["pnl_r"] for t in winning_trades)
-    gross_loss_r = abs(sum(t["pnl_r"] for t in losing_trades)) or 0.001
-    net_pnl_r = sum(t["pnl_r"] for t in trades)
-
-    profit_factor = gross_profit_r / gross_loss_r
-    avg_win_r = (gross_profit_r / win_count) if win_count > 0 else 0.0
-    avg_loss_r = (gross_loss_r / loss_count) if loss_count > 0 else 0.0
-    payoff_ratio = (avg_win_r / avg_loss_r) if avg_loss_r > 0 else 0.0
-
-    expectancy_r = ((win_rate / 100.0) * avg_win_r) - (((100.0 - win_rate) / 100.0) * avg_loss_r)
-
-    cum_r = 0.0
-    peak_r = 0.0
-    max_dd_r = 0.0
-    for t in trades:
-        cum_r += t["pnl_r"]
-        if cum_r > peak_r:
-            peak_r = cum_r
-        dd = peak_r - cum_r
-        if dd > max_dd_r:
-            max_dd_r = dd
-
-    if win_rate >= 50.0 and profit_factor >= 1.60 and expectancy_r >= 0.25:
-        tier = "INSTITUTIONAL EDGE"
-    elif profit_factor >= 1.20 and expectancy_r > 0:
-        tier = "MODERATE EDGE"
-    elif profit_factor >= 1.00:
-        tier = "MARGINAL"
-    else:
-        tier = "NEGATIVE EDGE (BLEEDER)"
-
-    return {
+    is_trades = _simulate_trades(bars, atr_series, raw_beep, spread_val, 0, split_idx, **params)
+    result: Dict[str, Any] = {
         "symbol": symbol,
         "timeframe": tf_label,
-        "bars_evaluated": len(bars),
-        "total_trades": total_trades,
-        "wins": win_count,
-        "losses": loss_count,
-        "be_count": len(be_trades),
-        "win_rate_pct": round(win_rate, 1),
-        "gross_profit_r": round(gross_profit_r, 2),
-        "gross_loss_r": round(gross_loss_r, 2),
-        "net_pnl_r": round(net_pnl_r, 2),
-        "profit_factor": round(profit_factor, 2),
-        "avg_win_r": round(avg_win_r, 2),
-        "avg_loss_r": round(avg_loss_r, 2),
-        "payoff_ratio": round(payoff_ratio, 2),
-        "expectancy_r": round(expectancy_r, 3),
-        "max_drawdown_r": round(max_dd_r, 2),
-        "spread_friction_eta": round(friction_eta, 4),
-        "tier": tier,
+        "bars_evaluated": split_idx,
+        "methodology_version": METHODOLOGY_VERSION,
     }
+    result.update(_compute_metrics(is_trades))
+
+    recent_atr = atr_series[-1] if atr_series else 0.001
+    result["spread_friction_eta"] = round((spread_val / recent_atr) if recent_atr > 0 else 0.0, 4)
+
+    if split_idx < len(bars):
+        oos_trades = _simulate_trades(bars, atr_series, raw_beep, spread_val, split_idx, len(bars), **params)
+        oos = _compute_metrics(oos_trades)
+        oos["bars_evaluated"] = len(bars) - split_idx
+        result["oos_split"] = oos_split
+        result["oos"] = oos
+        result["oos_confirms_edge"] = bool(
+            result["tier"] in ("INSTITUTIONAL EDGE", "MODERATE EDGE")
+            and oos["total_trades"] >= 10 and oos["profit_factor"] >= 1.0 and oos["expectancy_r"] > 0
+        )
+    return result
 
 
 def main():
+    import argparse
+    parser = argparse.ArgumentParser(description="BEEP edge verification matrix (MT5 history)")
+    parser.add_argument("--oos-split", type=float, default=0.0,
+                        help="Hold out the last fraction of bars per front as out-of-sample (e.g. 0.3). Default: 0 (in-sample only)")
+    parser.add_argument("--bars", type=int, default=1500, help="Bars per front (default: 1500)")
+    args = parser.parse_args()
+
+    if OriginalRawBeep is None:
+        print("[!] ERROR: this backtest requires the private BEEP vault module "
+              "vault_original_beep.raw_beep_equations (not in this repo).")
+        sys.exit(1)
+
+    print(f"[!] METHODOLOGY {METHODOLOGY_VERSION}: {METHODOLOGY_NOTE}")
+    if not args.oos_split:
+        print("[!] WARNING: running in-sample only. Use --oos-split 0.3 to validate selections out of sample.")
+
     terminal_path = r"C:\Program Files\MetaTrader 5\terminal64.exe"
     print(f"[*] Initializing MT5 Terminal at {terminal_path}...")
     if not mt5.initialize(terminal_path):
@@ -393,7 +417,7 @@ def main():
             print(f"[{front_counter}/{total_fronts}] Evaluating {sym} ({tf_label})...", end=" ", flush=True)
 
             try:
-                res = simulate_beep_front(sym, tf_label, tf_code, bars_count=1500)
+                res = simulate_beep_front(sym, tf_label, tf_code, bars_count=args.bars, oos_split=args.oos_split)
                 if res:
                     results.append(res)
                     if res["total_trades"] > 0:
@@ -439,10 +463,10 @@ def main():
         json.dump(results, jf, indent=2)
     print(f"\n[+] Raw results saved to {JSON_RESULTS_FILE}")
 
-    generate_markdown_report(results, total_fronts, time.time() - start_time)
+    generate_markdown_report(results, total_fronts, time.time() - start_time, oos_split=args.oos_split)
 
 
-def generate_markdown_report(results: List[Dict[str, Any]], total_fronts: int, elapsed_sec: float):
+def generate_markdown_report(results: List[Dict[str, Any]], total_fronts: int, elapsed_sec: float, oos_split: float = 0.0):
     """Compiles the formal quantitative edge report."""
     os.makedirs(os.path.dirname(REPORT_FILE), exist_ok=True)
 
@@ -473,6 +497,16 @@ def generate_markdown_report(results: List[Dict[str, Any]], total_fronts: int, e
     md.append(f"**Chief Quantitative Architect:** Jimmy Mathu  ")
     md.append(f"**Audit Execution Time:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}  ")
     md.append(f"**Total Fronts Evaluated:** {len(valid_results)} active of {total_fronts} | **Elapsed Time:** {elapsed_sec:.1f}s\n")
+    md.append(f"> **Methodology {METHODOLOGY_VERSION}:** {METHODOLOGY_NOTE}\n")
+    if oos_split:
+        confirmed = [r for r in valid_results if r.get("oos_confirms_edge")]
+        selected = [r for r in valid_results if r["tier"] in ("INSTITUTIONAL EDGE", "MODERATE EDGE")]
+        md.append(f"> **Out-of-sample:** last {oos_split*100:.0f}% of bars held out. "
+                  f"{len(confirmed)} of {len(selected)} in-sample edges held up out of sample "
+                  f"(OOS PF >= 1.0, OOS E > 0, >= 10 OOS trades).\n")
+    else:
+        md.append("> **WARNING:** in-sample only. Edge tiers below are selected on the same data they are "
+                  "measured on and are optimistic; re-run with `--oos-split 0.3`.\n")
     md.append("---\n")
 
     md.append("## 1. Executive Summary & Core Findings\n")
@@ -496,10 +530,12 @@ def generate_markdown_report(results: List[Dict[str, Any]], total_fronts: int, e
 
     md.append("\n---\n")
     md.append("## 3. Top Institutional Edge Setups (Approved for Sajim V2 Engine)\n")
-    md.append("| Asset | TF | Trades | Win Rate | Profit Factor | Payoff Ratio | Expectancy (R) | Max DD (R) | Spread Friction (η) |")
-    md.append("| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |")
+    md.append("| Asset | TF | Trades | Win Rate | Profit Factor | Payoff Ratio | Expectancy (R) | Max DD (R) | Spread Friction (η) | OOS PF / E (trades) |")
+    md.append("| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |")
     for r in institutional_edges:
-        md.append(f"| **{r['symbol']}** | `{r['timeframe']}` | {r['total_trades']} | **{r['win_rate_pct']}%** | **{r['profit_factor']:.2f}** | {r['payoff_ratio']:.2f}:1 | **+{r['expectancy_r']:.3f}R** | -{r['max_drawdown_r']:.1f}R | {r['spread_friction_eta']:.4f} |")
+        oos = r.get("oos")
+        oos_txt = f"{oos['profit_factor']:.2f} / {oos['expectancy_r']:+.3f}R ({oos['total_trades']})" if oos else "n/a (in-sample only)"
+        md.append(f"| **{r['symbol']}** | `{r['timeframe']}` | {r['total_trades']} | **{r['win_rate_pct']}%** | **{r['profit_factor']:.2f}** | {r['payoff_ratio']:.2f}:1 | **+{r['expectancy_r']:.3f}R** | -{r['max_drawdown_r']:.1f}R | {r['spread_friction_eta']:.4f} | {oos_txt} |")
 
     md.append("\n---\n")
     md.append("## 4. Toxic Bleeders (Mandatory Blacklist for Sajim V2)\n")

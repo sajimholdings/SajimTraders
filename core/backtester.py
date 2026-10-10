@@ -2,7 +2,14 @@
 Sajim Holdings — BEEP Quantitative Backtesting Engine (backtester.py)
 Tests BEEP signals and Sammy's 4-Check Gatekeeper against real historical market data.
 Simulates a $400 USD starter account with realistic spreads, slippage, and lot sizes.
-Saves all tests systematically in the /test/ directory.
+Saves all tests systematically in the /tests/ directory.
+
+Data integrity:
+  - If the Yahoo Finance fetch fails, the run FAILS (RuntimeError) unless synthetic data
+    was explicitly allowed (allow_synthetic=True / `run.py backtest --allow-synthetic`).
+    Synthetic runs are labelled SYNTHETIC in every report and metrics file.
+  - Max drawdown is measured on a mark-to-market equity curve (open position valued at
+    the adverse bar extreme every bar), not only on closed trades.
 """
 
 import os
@@ -21,7 +28,14 @@ for p in (ROOT_DIR, BASE_DIR, os.path.join(ROOT_DIR, "bots"), os.path.join(ROOT_
     if p not in sys.path:
         sys.path.insert(0, p)
 
-from beep_core import BeepCoreEngine
+try:
+    from beep_core import BeepCoreEngine  # private BEEP module (git-ignored)
+except ImportError:  # pragma: no cover - depends on private modules
+    BeepCoreEngine = None
+
+
+class SyntheticDataNotAllowed(RuntimeError):
+    """Raised when real data could not be fetched and synthetic data was not allowed."""
 
 
 class BeepBacktester:
@@ -33,11 +47,16 @@ class BeepBacktester:
         lot_size: float = 0.01,
         spread_usd: float = 0.35,  # 35 cents average Gold spread
         contract_size: float = 100.0,  # Standard lot = 100 oz (0.01 lot = 1 oz)
+        allow_synthetic: bool = False,
     ):
+        if BeepCoreEngine is None:
+            raise ImportError("BeepBacktester requires the private BEEP module beep_core (core/beep_*), not in this repo")
         self.initial_balance = initial_balance
         self.lot_size = lot_size
         self.spread_usd = spread_usd
         self.contract_size = contract_size
+        self.allow_synthetic = allow_synthetic
+        self.data_source = "UNKNOWN"
         self.engine = BeepCoreEngine()
 
     def fetch_yahoo_historical(self, ticker: str = "GC=F", interval: str = "1h", range_period: str = "1mo") -> List[Dict[str, Any]]:
@@ -71,9 +90,19 @@ class BeepBacktester:
                         "close": round(float(closes[i]), 2),
                         "volume": float(volumes[i] or 0),
                     })
+            if not bars:
+                raise ValueError("Yahoo returned no usable bars")
+            self.data_source = f"YAHOO:{ticker}"
             return bars
         except Exception as e:
-            print(f"[!] Warning: Could not fetch real data from Yahoo API ({e}). Generating high-fidelity calibrated benchmark data.")
+            if not self.allow_synthetic:
+                raise SyntheticDataNotAllowed(
+                    f"Could not fetch real data for {ticker} from Yahoo ({e}). Refusing to substitute synthetic "
+                    f"data; re-run with --allow-synthetic to run on clearly-labelled SYNTHETIC data."
+                ) from e
+            print(f"[!] WARNING: Yahoo fetch failed for {ticker} ({e}). Using SYNTHETIC random-walk data "
+                  f"(--allow-synthetic). Results are NOT evidence of edge.")
+            self.data_source = "SYNTHETIC"
             return self.generate_benchmark_market_data(start_price=2320.0, n_bars=350)
 
     def generate_benchmark_market_data(self, start_price: float = 2320.0, n_bars: int = 350) -> List[Dict[str, Any]]:
@@ -128,11 +157,32 @@ class BeepBacktester:
 
         trades: List[Dict[str, Any]] = []
         open_position: Optional[Dict[str, Any]] = None
+        units = self.lot_size * self.contract_size
+
+        def _mark_drawdown(equity_value: float) -> None:
+            nonlocal peak_balance, max_drawdown, max_drawdown_usd
+            peak_balance = max(peak_balance, equity_value)
+            dd_usd = peak_balance - equity_value
+            dd_pct = (dd_usd / peak_balance) * 100.0 if peak_balance > 0 else 0.0
+            if dd_pct > max_drawdown:
+                max_drawdown = dd_pct
+                max_drawdown_usd = dd_usd
 
         lookback = 15
         for i in range(lookback, len(bars)):
             current_bar = bars[i]
             history_closes = [b["close"] for b in bars[i - lookback : i + 1]]
+
+            # Mark-to-market: value any open position at the bar's ADVERSE extreme
+            if open_position is not None:
+                pos = open_position
+                if pos["direction"] == "BUY":
+                    worst = max(current_bar["low"], pos["sl"]) if pos["sl"] else current_bar["low"]
+                    unreal = (worst - pos["entry_price"]) * units
+                else:
+                    worst = min(current_bar["high"], pos["sl"]) if pos["sl"] else current_bar["high"]
+                    unreal = (pos["entry_price"] - worst) * units
+                _mark_drawdown(balance + unreal - (self.spread_usd * units))
 
             # 1. Manage existing open position
             if open_position is not None:
@@ -185,13 +235,7 @@ class BeepBacktester:
                     gross_pnl = (exit_price - pos["entry_price"]) * mult * (self.lot_size * self.contract_size)
                     net_pnl = gross_pnl - (self.spread_usd * self.lot_size * self.contract_size)
                     balance += net_pnl
-
-                    peak_balance = max(peak_balance, balance)
-                    dd_usd = peak_balance - balance
-                    dd_pct = (dd_usd / peak_balance) * 100.0 if peak_balance > 0 else 0.0
-                    if dd_pct > max_drawdown:
-                        max_drawdown = dd_pct
-                        max_drawdown_usd = dd_usd
+                    _mark_drawdown(balance)
 
                     trades.append({
                         "trade_id": len(trades) + 1,
@@ -262,6 +306,9 @@ class BeepBacktester:
         return {
             "symbol": symbol,
             "style": style,
+            "data_source": self.data_source,
+            "synthetic_data": self.data_source == "SYNTHETIC",
+            "drawdown_method": "mark-to-market (adverse bar extreme)",
             "initial_balance": self.initial_balance,
             "final_balance": round(balance, 2),
             "net_profit_usd": net_profit_usd,
@@ -281,10 +328,23 @@ class BeepBacktester:
         test_dir = os.path.join(ROOT_DIR, "tests", test_name)
         os.makedirs(test_dir, exist_ok=True)
 
+        synthetic = bool(results.get("synthetic_data")) or str(results.get("data_source", "")).startswith("SYNTHETIC")
+        banner = (
+            "> **SYNTHETIC DATA** — real market data could not be fetched; these results come from a random-walk "
+            "generator and are NOT evidence of any trading edge.\n\n" if synthetic else ""
+        )
+        max_dd = float(results.get("max_drawdown_pct", 0.0))
+        dd_verdict = (
+            f"Max drawdown {max_dd}% is within the 10% prop-firm limit." if max_dd < 10.0
+            else f"Max drawdown {max_dd}% EXCEEDS the 10% prop-firm limit."
+        )
+
         # 1. description.md
         desc_path = os.path.join(test_dir, "description.md")
         with open(desc_path, "w", encoding="utf-8") as f:
-            f.write(f"# TEST LOG: {test_name.upper()}\n\n")
+            f.write(f"# TEST LOG: {test_name.upper()}{' [SYNTHETIC]' if synthetic else ''}\n\n")
+            f.write(banner)
+            f.write(f"**Data Source:** {results.get('data_source', 'UNKNOWN')}\n")
             f.write(f"**Execution Date:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
             f.write(f"**Target Instrument:** {results['symbol']}\n")
             f.write(f"**Trading Style:** {results['style']}\n")
@@ -300,7 +360,8 @@ class BeepBacktester:
         # 2. report.md
         report_path = os.path.join(test_dir, "report.md")
         with open(report_path, "w", encoding="utf-8") as f:
-            f.write(f"# EXECUTIVE PERFORMANCE REPORT — {test_name.upper()}\n\n")
+            f.write(f"# EXECUTIVE PERFORMANCE REPORT — {test_name.upper()}{' [SYNTHETIC]' if synthetic else ''}\n\n")
+            f.write(banner)
             f.write("## 1. Key Performance Indicators (KPIs)\n\n")
             f.write(f"| Metric | Result | Target Benchmark |\n")
             f.write(f"| :--- | :--- | :--- |\n")
@@ -314,7 +375,10 @@ class BeepBacktester:
 
             f.write("## 2. Risk & Gatekeeper Audit\n")
             f.write(f"- **Sammy 4-Check Rejections:** Automatically filtered false momentum spikes before capital commitment.\n")
-            f.write(f"- **Max Drawdown Protection:** Drawdown remained at **{results['max_drawdown_pct']}%**, well within prop challenge safety limit (10%).\n\n")
+            f.write(f"- **Max Drawdown (mark-to-market):** {dd_verdict}\n")
+            if results.get("total_trades", 0) < 30:
+                f.write(f"- **Sample size:** only {results.get('total_trades', 0)} trades — not statistically meaningful.\n")
+            f.write("\n")
 
             f.write("## 3. Trade Log Summary (Recent Trades)\n\n")
             f.write("| ID | Direction | Entry Time | Entry | Exit | Net PnL | Exit Reason | Running Balance |\n")
@@ -332,6 +396,7 @@ class BeepBacktester:
         # 4. metrics.json
         json_path = os.path.join(test_dir, "metrics.json")
         metrics_clean = {k: v for k, v in results.items() if k != "trades"}
+        metrics_clean["synthetic_data"] = synthetic
         with open(json_path, "w", encoding="utf-8") as f:
             json.dump(metrics_clean, f, indent=2)
 
@@ -339,7 +404,7 @@ class BeepBacktester:
         return test_dir
 
 
-def execute_test_001():
+def execute_test_001(allow_synthetic: bool = False):
     print("=" * 70)
     print("       STARTING BEEP TEST 001: BASELINE $400 USD XAUUSD")
     print("=" * 70)
@@ -349,6 +414,7 @@ def execute_test_001():
         lot_size=0.01,
         spread_usd=0.35,
         contract_size=100.0,
+        allow_synthetic=allow_synthetic,
     )
 
     # 1. Ingest Data (Gold XAUUSD)
@@ -385,7 +451,7 @@ def execute_test_001():
     print("=" * 70)
 
 
-def execute_test_002():
+def execute_test_002(allow_synthetic: bool = False):
     print("\n" + "=" * 70)
     print("     STARTING BEEP TEST 002: OPTIMIZED RISK & COOLDOWN ($400 XAUUSD)")
     print("=" * 70)
@@ -395,6 +461,7 @@ def execute_test_002():
         lot_size=0.01,
         spread_usd=0.35,
         contract_size=100.0,
+        allow_synthetic=allow_synthetic,
     )
 
     bars = backtester.fetch_yahoo_historical(ticker="GC=F", interval="1h", range_period="1mo")
@@ -427,7 +494,7 @@ def execute_test_002():
     print("=" * 70)
 
 
-def execute_test_003():
+def execute_test_003(allow_synthetic: bool = False):
     print("\n" + "=" * 70)
     print("     STARTING BEEP TEST 003: COLLECTIVE 5-PAIR PORTFOLIO ($400 USD)")
     print("     Pairs: XAUUSD, EURUSD, GBPUSD, USDJPY, US30")
@@ -445,10 +512,12 @@ def execute_test_003():
         initial_balance=400.0,
         lot_size=0.01,
         spread_usd=0.35,
+        allow_synthetic=allow_synthetic,
     )
 
     all_trades: List[Dict[str, Any]] = []
     pair_summaries = {}
+    data_sources = {}
 
     total_profit_usd = 0.0
     initial_bal = 400.0
@@ -467,6 +536,7 @@ def execute_test_003():
         backtester.contract_size = p["contract"]
 
         p_res = backtester.run_backtest(bars=bars, symbol=p["symbol"], style="INTRADAY")
+        data_sources[p["symbol"]] = backtester.data_source
         pair_summaries[p["symbol"]] = {
             "trades": p_res["total_trades"],
             "wins": p_res["winning_trades"],
@@ -508,6 +578,10 @@ def execute_test_003():
     results = {
         "symbol": "COLLECTIVE_5_PAIRS",
         "style": "INTRADAY_COLLECTIVE",
+        "data_source": "SYNTHETIC (one or more pairs)" if any(v == "SYNTHETIC" for v in data_sources.values()) else "YAHOO",
+        "data_sources": data_sources,
+        "synthetic_data": any(v == "SYNTHETIC" for v in data_sources.values()),
+        "drawdown_method": "closed-trade portfolio replay (per-pair runs use mark-to-market)",
         "initial_balance": initial_bal,
         "final_balance": round(balance, 2),
         "net_profit_usd": net_profit,
