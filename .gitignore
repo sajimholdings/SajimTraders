@@ -83,3 +83,7 @@ archives/
 
 # Session/conversation transcripts (sensitive tier; kept local-only by decision)
 docs/conversation_history/
+
+# Bot runtime state & kill switch
+state/
+KILL_SWITCH

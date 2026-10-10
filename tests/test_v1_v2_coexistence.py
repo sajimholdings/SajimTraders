@@ -11,7 +11,7 @@ Comprehensive Verification Suite:
   [Test 4] Currency Cluster Exposure Cap: Single-currency overexposure guard
   [Test 5] Account-Wide Daily Drawdown Circuit Breaker: 5% risk stop
   [Test 6] Trend Duration Maturity Engine: Vectorized HMA & phase transitions
-  [Test 7] Pluggable Cartridge 1: Young Surge Continuation (1:3.0R)
+  [Test 7] Pluggable Cartridge 1: Young Surge Continuation (1:1.2R)
   [Test 8] Pluggable Cartridge 2: Exhaustion Mean Reversion (1:2.0R)
   [Test 9] Telemetry & WebApp API Bridge: Status JSON serialization
   [Test 10] Dual Orchestrator Dry-Run: Coordinated execution cycle
@@ -72,7 +72,7 @@ class TestV1V2CoexistenceSuite(unittest.TestCase):
 
     def test_02_directional_conflict_shield(self):
         """Verify opposing trades on the same asset are blocked to prevent spread bleed."""
-        acc = SimpleNamespace(balance=100.0, equity=100.0, margin=10.0, margin_free=90.0, margin_level=1000.0, currency="USC")
+        acc = SimpleNamespace(balance=100.0, equity=100.0, margin=10.0, margin_free=90.0, margin_level=1000.0, currency="USD")
         # V1 is LONG on EURUSD.c
         positions = [
             SimpleNamespace(ticket=101, symbol="EURUSD.c", type=0, volume=0.01, price_open=1.0500, sl=1.0450, tp=1.0650, profit=0.0, magic=MAGIC_V1, comment="Sajim_V1"),
@@ -90,7 +90,7 @@ class TestV1V2CoexistenceSuite(unittest.TestCase):
 
     def test_03_aggregate_concurrency_cap(self):
         """Verify combined positions across both bots cannot exceed the portfolio ceiling."""
-        acc = SimpleNamespace(balance=100.0, equity=100.0, margin=30.0, margin_free=70.0, margin_level=600.0, currency="USC")
+        acc = SimpleNamespace(balance=100.0, equity=100.0, margin=30.0, margin_free=70.0, margin_level=600.0, currency="USD")
         positions = [
             SimpleNamespace(ticket=i, symbol=f"SYM{i}.c", type=0, volume=0.01, price_open=1.0, sl=0.9, tp=1.2, profit=0.0, magic=MAGIC_V1 if i % 2 == 0 else MAGIC_V2, comment="")
             for i in range(6)
@@ -104,7 +104,7 @@ class TestV1V2CoexistenceSuite(unittest.TestCase):
 
     def test_04_macro_currency_cluster_cap(self):
         """Verify no single currency can exceed the max exposure limit (max 2 trades per currency)."""
-        acc = SimpleNamespace(balance=100.0, equity=100.0, margin=15.0, margin_free=85.0, margin_level=800.0, currency="USC")
+        acc = SimpleNamespace(balance=100.0, equity=100.0, margin=15.0, margin_free=85.0, margin_level=800.0, currency="USD")
         positions = [
             SimpleNamespace(ticket=1, symbol="USDJPY.c", type=1, volume=0.01, price_open=150.0, sl=151.0, tp=147.0, profit=0.0, magic=MAGIC_V1, comment=""),
             SimpleNamespace(ticket=2, symbol="EURJPY.c", type=1, volume=0.01, price_open=160.0, sl=161.0, tp=157.0, profit=0.0, magic=MAGIC_V2, comment=""),
@@ -154,10 +154,10 @@ class TestV1V2CoexistenceSuite(unittest.TestCase):
         self.assertGreater(mat["hma_val"], 0)
 
     def test_07_young_surge_continuation_cartridge(self):
-        """Verify YoungSurgeContinuation generates a valid 1:3.0R signal."""
+        """Verify YoungSurgeContinuation generates a valid 1:1.2R signal (default changed from 3.0 in 43392b3)."""
         cart = YoungSurgeContinuation()
         self.assertTrue(cart.enabled)
-        self.assertEqual(cart.parameters["tp_rr_ratio"], 3.0)
+        self.assertEqual(cart.parameters["tp_rr_ratio"], 1.2)
 
         # Generate 100 bars
         bars = []
@@ -175,7 +175,7 @@ class TestV1V2CoexistenceSuite(unittest.TestCase):
         market_info = {"point": 0.00001, "spread": 10, "bid": p, "ask": p + 0.0001}
         signal = cart.evaluate("USDCAD.c", "M15", bars, market_info)
         if signal:
-            self.assertEqual(signal.risk_reward, 3.0)
+            self.assertEqual(signal.risk_reward, 1.2)
             self.assertEqual(signal.action, "BUY")
             self.assertGreater(signal.take_profit, signal.entry_price)
 
@@ -204,7 +204,10 @@ class TestV1V2CoexistenceSuite(unittest.TestCase):
 
     def test_10_dual_orchestrator_initialization(self):
         """Verify SajimDualOrchestrator wires V1 and V2 with CoexistenceGatekeeper."""
-        from v2.dual_orchestrator import SajimDualOrchestrator
+        try:
+            from v2.dual_orchestrator import SajimDualOrchestrator
+        except ImportError as exc:
+            self.skipTest(f"requires private BEEP modules: {exc}")
         orchestrator = SajimDualOrchestrator(
             scan_interval_seconds=15,
             max_combined_positions=12,
